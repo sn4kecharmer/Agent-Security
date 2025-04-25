@@ -1,0 +1,77 @@
+# Complex agent configuration with nested tools and custom patterns
+version: "1.0"
+
+agents:
+  code_assistant:
+    type: "autonomous"
+    capabilities:
+      shell_access:  # High risk
+        enabled: true
+        allowed_commands: ["git", "python", "npm"]
+        working_directory: "./workspace"
+        timeout: 30
+      
+      file_operations:  # High risk
+        read:
+          enabled: true
+          allowed_paths: ["./src", "./docs"]
+        write:
+          enabled: true
+          allowed_paths: ["./output", "./logs"]
+      
+      network:  # Medium risk
+        requests:
+          enabled: true
+          allowed_domains:
+            - "api.github.com"
+            - "raw.githubusercontent.com"
+        websocket:
+          enabled: false
+      
+      database:  # Medium risk
+        type: "sqlite"
+        path: "./data/cache.db"
+        max_connections: 5
+
+  research_assistant:
+    type: "semi-autonomous"
+    capabilities:
+      web_search:  # Medium risk
+        enabled: true
+        providers:
+          - name: "serpapi"
+            api_key: "${SERP_API_KEY}"
+          - name: "google_custom_search"
+            api_key: "${GOOGLE_API_KEY}"
+      
+      content_generation:  # Low risk
+        enabled: true
+        max_length: 1000
+        temperature: 0.7
+      
+      math:  # Low risk
+        calculator:
+          enabled: true
+          operations: ["basic", "scientific"]
+        plotting:
+          enabled: true
+          max_points: 1000
+
+security_settings:
+  max_tokens_per_request: 2000
+  rate_limiting:
+    requests_per_minute: 60
+    burst: 10
+  
+  audit:
+    enabled: true
+    log_file: "./logs/audit.log"
+    log_level: "INFO"
+    
+  sandbox:
+    enabled: true
+    isolation_level: "process"  # Could be process, container, or vm
+    resource_limits:
+      memory_mb: 512
+      cpu_percent: 50
+      disk_mb: 1000 

@@ -1,0 +1,44 @@
+# Example YAML configuration for an LLM agent
+agent:
+  name: "Test Agent"
+  description: "An agent with various tools for demonstration"
+  
+  # High risk tools
+  tools:
+    shell:
+      enabled: true
+      description: "Execute shell commands"
+    
+    python_repl:
+      enabled: true
+      description: "Execute Python code"
+    
+    # Medium risk tools
+    web:
+      enabled: true
+      endpoints:
+        - "https://api.example.com"
+        - "https://data.example.com"
+    
+    # Safe tools
+    calculator:
+      enabled: true
+      operations:
+        - "add"
+        - "subtract"
+        - "multiply"
+        - "divide"
+    
+    search:
+      enabled: true
+      provider: "local"
+      index: "knowledge_base"
+
+  # Additional configurations
+  memory:
+    type: "conversation"
+    max_tokens: 1000
+  
+  safety:
+    max_iterations: 10
+    rate_limit: 5 

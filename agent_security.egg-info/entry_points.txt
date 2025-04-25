@@ -1,0 +1,2 @@
+[console_scripts]
+agent-security = agent_security.cli:main

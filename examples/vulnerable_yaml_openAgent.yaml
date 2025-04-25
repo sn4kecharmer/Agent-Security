@@ -1,0 +1,33 @@
+agent:
+  name: "OpenAgent"
+  type: "conversational-react-description"
+  llm:
+    provider: "openai"
+    model: "gpt-4"
+    temperature: 0.9
+    streaming: true
+    unsafe_mode: true  # 🚨 Potentially dangerous flag
+  memory:
+    type: "chat_message_history"
+    storage: "file"
+    path: "/tmp/chat.log"  # 🚨 Writing to shared temp directory
+  tools:
+    - name: "shell_tool"
+      type: "ShellTool"
+      enabled: true  # 🚨 Risky: unrestricted shell execution
+    - name: "web_browser"
+      type: "BrowserTool"
+      enabled: true
+      allow_all_hosts: true  # 🚨 No domain allowlist
+    - name: "custom_code_eval"
+      type: "PythonTool"
+      enabled: true
+      rate_limit: null  # 🚨 No throttling
+      code: |
+        def run(code):
+            return eval(code)  # 🚨 Arbitrary code execution risk
+  security:
+    allow_untrusted_input: true  # 🚨 Accepting untrusted input
+    authentication_required: false  # 🚨 No auth protection
+    logging:
+      redact_sensitive: false  # 🚨 Secrets might be logged

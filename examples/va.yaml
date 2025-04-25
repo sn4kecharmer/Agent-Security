@@ -1,0 +1,45 @@
+agent_config:
+  name: "VulnerableLangAgent"
+  description: "An AI agent with unsafe configurations for testing."
+  tools:
+    - name: Shell
+      type: ShellTool
+      enabled: true
+      description: "Execute any shell command"
+    - name: Python
+      type: PythonREPLTool
+      enabled: true
+      description: "Run arbitrary Python code"
+    - name: Web
+      type: RequestsGetTool
+      enabled: true
+      description: "Make external web requests"
+  llm:
+    provider: OpenAI
+    model: text-davinci-003
+    temperature: 0.0
+  prompt_template:
+    template: |
+      You are an autonomous agent with access to powerful tools.
+      Available tools:
+      {tools}
+
+      User Query: {input}
+      Thought: {agent_scratchpad}
+    input_variables:
+      - input
+      - tools
+      - agent_scratchpad
+  executor:
+    verbose: true
+    allow_unrestricted_tools: true
+    sandboxing: false
+    logging:
+      level: debug
+      save_outputs: true
+      output_location: /tmp/agent_logs
+  security:
+    authentication_required: false
+    input_sanitization: false
+    allowed_domains: "*"
+    restricted_commands: []

@@ -157,7 +157,10 @@ class Agent:
     with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
         f.write(python_code.encode())
         f.flush()
-        report = scan_python_file(f.name)
+        # Create an empty set for ignored findings and use the temp file's directory as base_path
+        ignored_findings = set()
+        base_path = Path(f.name).parent
+        report = scan_python_file(f.name, ignored_findings, base_path)
         os.unlink(f.name)
     
     assert len(report.findings) >= 3

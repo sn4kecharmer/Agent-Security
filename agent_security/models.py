@@ -69,6 +69,7 @@ class SecurityFinding:
     line_number: Optional[int] = None
     context: Optional[str] = None
     security_info: Optional[SecurityInfo] = None
+    file_path: Optional[str] = None
 
 @dataclass
 class SecurityReport:

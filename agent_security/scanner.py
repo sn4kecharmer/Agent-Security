@@ -20,13 +20,71 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-def scan_python_file(file_path: str) -> SecurityReport:
+# --- False Positive Handling ---
+IGNORE_FILE_NAME = ".agent_security_ignore"
+
+def load_ignored_findings(base_path: Path) -> Set[Tuple[str, int, str]]:
+    """Loads ignored findings from the ignore file."""
+    ignored = set()
+    ignore_file_path = base_path / IGNORE_FILE_NAME
+    if not ignore_file_path.is_file():
+        # Try searching upwards for the ignore file if not in the immediate base path
+        current_dir = base_path.resolve()
+        while current_dir != current_dir.parent:
+            potential_path = current_dir / IGNORE_FILE_NAME
+            if potential_path.is_file():
+                ignore_file_path = potential_path
+                break
+            current_dir = current_dir.parent
+        else: # If loop completes without finding the file
+             ignore_file_path = base_path / IGNORE_FILE_NAME # Default back if not found upwards
+
+    if ignore_file_path.is_file():
+        try:
+            with open(ignore_file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split(':', 2)
+                    if len(parts) == 3:
+                        file, line_num_str, pattern = parts
+                        try:
+                            # Store relative path for comparison
+                            relative_file = str(Path(file).relative_to(ignore_file_path.parent))
+                            ignored.add((relative_file, int(line_num_str), pattern))
+                        except (ValueError, TypeError):
+                            print(f"Warning: Skipping invalid ignore entry: {line}") # Handle potential errors converting line number
+                    else:
+                         print(f"Warning: Skipping malformed ignore entry: {line}")
+        except IOError as e:
+            print(f"Warning: Could not read ignore file {ignore_file_path}: {e}")
+    return ignored
+
+def is_finding_ignored(finding: SecurityFinding, ignored_set: Set[Tuple[str, int, str]], base_path: Path) -> bool:
+    """Checks if a finding is in the ignored set."""
+    try:
+        # Ensure comparison uses relative paths from the ignore file's perspective
+        relative_finding_path = str(Path(finding.file_path).relative_to(base_path))
+        return (relative_finding_path, finding.line_number, finding.pattern) in ignored_set
+    except ValueError:
+        # Handle cases where the finding path might not be relative to the base path
+        # This might happen with absolute paths or paths outside the project during git scans
+        # For now, we assume such findings are not ignored by a relative ignore file.
+        # A more robust solution might involve normalizing paths.
+        return False
+# --- End False Positive Handling ---
+
+
+def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_path: Path) -> SecurityReport:
     """
-    Scan a Python file for potential security issues.
-    
+    Scan a Python file for potential security issues, skipping ignored findings.
+
     Args:
         file_path: Path to the Python file
-        
+        ignored_findings: Set of findings to ignore
+        base_path: The base path from which the scan was initiated (to resolve relative ignore paths)
+
     Returns:
         SecurityReport containing findings with detailed security information
     """
@@ -50,43 +108,99 @@ def scan_python_file(file_path: str) -> SecurityReport:
         for node in ast.walk(tree):
             # Check for imports
             if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module_base = ""
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    module_base = node.module
+                
                 for alias in node.names:
                     module_name = alias.name
-                    if isinstance(node, ast.ImportFrom) and node.module:
-                        module_name = f"{node.module}.{module_name}"
-                    
-                    if 'langchain' in module_name:
-                        if ('langchain', node.lineno) not in processed_patterns:
+                    full_module_name = f"{module_base}.{module_name}" if module_base else module_name
+
+                    # LangChain Check
+                    if 'langchain' in full_module_name or module_base == 'langchain':
+                        pattern_key = 'langchain'
+                        if (pattern_key, node.lineno) not in processed_patterns:
                             context = ast.get_source_segment(source, node)
                             finding = SecurityFinding(
-                                pattern='langchain',
-                                risk_level=RiskLevel.HIGH,
+                                pattern=pattern_key,
+                                risk_level=TOOL_RISKS[pattern_key].risk_level,
                                 line_number=node.lineno,
                                 context=context,
-                                security_info=TOOL_RISKS['langchain']
+                                security_info=TOOL_RISKS[pattern_key],
+                                file_path=file_path # Add file_path to finding
                             )
-                            report.findings.append(finding)
-                            processed_patterns.add(('langchain', node.lineno))
-            
-            # Check for tool usage
+                            if not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+                            processed_patterns.add((pattern_key, node.lineno))
+
+                    # CrewAI Import Check
+                    if 'crewai' in full_module_name or module_base == 'crewai':
+                        pattern_key = 'crewai_import'
+                        if (pattern_key, node.lineno) not in processed_patterns:
+                             # Check if 'crewai_import' exists in TOOL_RISKS before accessing
+                            if pattern_key in TOOL_RISKS:
+                                context = ast.get_source_segment(source, node)
+                                finding = SecurityFinding(
+                                    pattern=pattern_key,
+                                    risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                    line_number=node.lineno,
+                                    context=context,
+                                    security_info=TOOL_RISKS[pattern_key],
+                                    file_path=file_path # Add file_path to finding
+                                )
+                                if not is_finding_ignored(finding, ignored_findings, base_path):
+                                    report.findings.append(finding)
+                                processed_patterns.add((pattern_key, node.lineno))
+                            else:
+                                # Handle case where pattern key might be missing (optional logging/warning)
+                                pass # Or log a warning: print(f"Warning: Pattern key '{pattern_key}' not found in TOOL_RISKS.")
+
+
+            # Check for tool usage and specific function calls
             elif isinstance(node, ast.Call):
-                if hasattr(node.func, 'id'):
-                    tool_name = node.func.id
-                    if tool_name in TOOL_RISKS:
-                        if (tool_name, node.lineno) not in processed_patterns:
-                            context = ast.get_source_segment(source, node)
-                            finding = SecurityFinding(
-                                pattern=tool_name,
-                                risk_level=TOOL_RISKS[tool_name].risk_level,
-                                line_number=node.lineno,
-                                context=context,
-                                security_info=TOOL_RISKS[tool_name]
-                            )
+                func_name = ""
+                if hasattr(node.func, 'id'): # Direct function call like Tool()
+                    func_name = node.func.id
+                elif isinstance(node.func, ast.Attribute) and hasattr(node.func.value, 'id'): # Method call like crewai.Agent()
+                     # We might want to check node.func.attr as well if needed
+                     pass # Keep func_name empty for now or refine if needed
+
+                # General Tool Risk Check
+                if func_name and func_name in TOOL_RISKS:
+                    if (func_name, node.lineno) not in processed_patterns:
+                        context = ast.get_source_segment(source, node)
+                        finding = SecurityFinding(
+                            pattern=func_name,
+                            risk_level=TOOL_RISKS[func_name].risk_level,
+                            line_number=node.lineno,
+                            context=context,
+                            security_info=TOOL_RISKS[func_name],
+                            file_path=file_path # Add file_path to finding
+                        )
+                        if not is_finding_ignored(finding, ignored_findings, base_path):
                             report.findings.append(finding)
-                            processed_patterns.add((tool_name, node.lineno))
-                
-                # Check for risky function definitions
-                elif isinstance(node.func, ast.Name) and node.func.id == 'Tool':
+                        processed_patterns.add((func_name, node.lineno))
+
+                # CrewAI Agent/Task Check
+                if func_name in ['Agent', 'Task']:
+                    pattern_key = f"crewai_{func_name.lower()}" # crewai_agent or crewai_task
+                    if pattern_key in TOOL_RISKS and (pattern_key, node.lineno) not in processed_patterns:
+                        context = ast.get_source_segment(source, node)
+                        finding = SecurityFinding(
+                            pattern=pattern_key,
+                            risk_level=TOOL_RISKS[pattern_key].risk_level,
+                            line_number=node.lineno,
+                            context=context,
+                            security_info=TOOL_RISKS[pattern_key],
+                            file_path=file_path # Add file_path to finding
+                        )
+                        if not is_finding_ignored(finding, ignored_findings, base_path):
+                           report.findings.append(finding)
+                        processed_patterns.add((pattern_key, node.lineno))
+
+
+                # Check for risky LangChain Tool definitions
+                if isinstance(node.func, ast.Name) and node.func.id == 'Tool':
                     # Look for risky tool definitions
                     for kw in node.keywords:
                         if kw.arg == 'description' and isinstance(kw.value, ast.Str):
@@ -97,10 +211,12 @@ def scan_python_file(file_path: str) -> SecurityReport:
                                     risk_level=RiskLevel.HIGH,
                                     line_number=node.lineno,
                                     context=desc,
-                                    security_info=YAML_TOOL_PATTERNS['risky_tool_description']
+                                    security_info=YAML_TOOL_PATTERNS['risky_tool_description'],
+                                    file_path=file_path # Add file_path to finding
                                 )
-                                report.findings.append(finding)
-                        
+                                if not is_finding_ignored(finding, ignored_findings, base_path):
+                                    report.findings.append(finding)
+
                         elif kw.arg == 'func' and isinstance(kw.value, ast.Lambda):
                             # Check for risky lambda functions
                             if isinstance(kw.value.body, ast.Call) and isinstance(kw.value.body.func, ast.Name):
@@ -116,30 +232,60 @@ def scan_python_file(file_path: str) -> SecurityReport:
                                             impact="Arbitrary code execution vulnerability",
                                             remediation="1. Remove eval/exec usage\n2. Use safe alternatives\n3. Implement input validation",
                                             pattern=re.compile(r'eval|exec')
-                                        )
+                                        ),
+                                        file_path=file_path # Add file_path to finding
                                     )
-                                    report.findings.append(finding)
+                                    if not is_finding_ignored(finding, ignored_findings, base_path):
+                                        report.findings.append(finding)
 
-        # Calculate overall risk based on findings
+            # Check for CrewAI @tool decorator
+            elif isinstance(node, ast.FunctionDef):
+                for decorator in node.decorator_list:
+                    is_tool_decorator = False
+                    if isinstance(decorator, ast.Name) and decorator.id == 'tool': # Simple @tool
+                        is_tool_decorator = True
+                    elif isinstance(decorator, ast.Call) and hasattr(decorator.func, 'id') and decorator.func.id == 'tool': # @tool(...)
+                        is_tool_decorator = True
+
+                    if is_tool_decorator:
+                        pattern_key = 'crewai_tool_decorator'
+                        if pattern_key in TOOL_RISKS and (pattern_key, node.lineno) not in processed_patterns:
+                            context = ast.get_source_segment(source, node) # Get the whole function definition
+                            finding = SecurityFinding(
+                                pattern=pattern_key,
+                                risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                line_number=node.lineno, # Line number of the function definition
+                                context=context,
+                                security_info=TOOL_RISKS[pattern_key],
+                                file_path=file_path # Add file_path to finding
+                            )
+                            if not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+                            processed_patterns.add((pattern_key, node.lineno))
+                        break # Found the @tool decorator, no need to check others for this function
+ 
+         # Calculate overall risk based on findings (outside the loop, inside try)
         if report.findings:
             risk_levels = [f.risk_level for f in report.findings]
             report.overall_risk = max(risk_levels)
 
-    except Exception as e:
+    except Exception as e: # Correctly aligned with try
         print(f"Error scanning Python file {file_path}: {e}")
         report.overall_risk = RiskLevel.CRITICAL
         report.metadata = {"error": str(e)}
 
     return report
 
-def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
+def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_path: Path) -> SecurityReport:
     """
-    Scan YAML content for security patterns.
-    
+    Scan YAML content for security patterns, skipping ignored findings.
+
     Args:
         content: YAML content to scan
         file_path: Path to the YAML file
-        
+        ignored_findings: Set of findings to ignore
+        base_path: The base path from which the scan was initiated
+
     Returns:
         SecurityReport containing findings with detailed security information
     """
@@ -156,7 +302,7 @@ def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
             finding = SecurityFinding(
                 pattern="yaml_injection",
                 risk_level=RiskLevel.CRITICAL,
-                line_number=None,
+                line_number=0, # Use 0 or a specific line if detectable, None might cause issues with ignore check
                 context="Dangerous YAML tags detected",
                 security_info=SecurityInfo(
                     risk_level=RiskLevel.CRITICAL,
@@ -164,11 +310,14 @@ def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
                     impact="Potential arbitrary code execution",
                     remediation="1. Disable custom YAML tags\n2. Use safe YAML loader\n3. Validate YAML content",
                     pattern=re.compile(r'!!python/')
-                )
+                ),
+                file_path=file_path # Add file_path to finding
             )
+            # YAML injection is critical, don't check ignore list for this one maybe? Or check if needed.
+            # if not is_finding_ignored(finding, ignored_findings, base_path):
             report.findings.append(finding)
             report.overall_risk = RiskLevel.CRITICAL
-            return report
+            return report # Return early for critical YAML injection
         
         # Use ruamel.yaml for better line number support
         yaml = ruamel.yaml.YAML(typ='safe')
@@ -212,10 +361,12 @@ def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
                                 risk_level=security_info.risk_level,
                                 line_number=current_line,
                                 context='\n'.join(context_lines),
-                                security_info=security_info
+                                security_info=security_info,
+                                file_path=file_path # Add file_path to finding
                             )
-                            report.findings.append(finding)
-                        
+                            if not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+
                         # Check value against pattern if it's a string
                         if isinstance(value, str) and security_info.pattern.search(value):
                             context_lines = []
@@ -230,10 +381,17 @@ def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
                                 risk_level=security_info.risk_level,
                                 line_number=current_line,
                                 context='\n'.join(context_lines),
-                                security_info=security_info
+                                security_info=security_info,
+                                file_path=file_path # Add file_path to finding
                             )
-                            report.findings.append(finding)
-                    
+                            # Avoid adding duplicate findings if key and value match the same pattern on the same line
+                            is_duplicate = any(
+                                f.pattern == finding.pattern and f.line_number == finding.line_number
+                                for f in report.findings
+                            )
+                            if not is_duplicate and not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+
                     # Recursively scan nested structures
                     if isinstance(value, (dict, list)):
                         scan_nested(value, current_path, key, current_line)
@@ -258,13 +416,15 @@ def scan_yaml_content(content: str, file_path: str) -> SecurityReport:
         
     return report
 
-def scan_file(file_path: str) -> SecurityReport:
+def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_path: Path) -> SecurityReport:
     """
-    Scan a file for security issues based on its extension.
-    
+    Scan a file for security issues based on its extension, skipping ignored findings.
+
     Args:
         file_path: Path to the file to scan
-        
+        ignored_findings: Set of findings to ignore
+        base_path: The base path from which the scan was initiated
+
     Returns:
         SecurityReport containing findings
     """
@@ -273,12 +433,13 @@ def scan_file(file_path: str) -> SecurityReport:
         raise FileNotFoundError(f"File not found: {file_path}")
     
     if file_path.suffix == '.py':
-        return scan_python_file(str(file_path))
+        return scan_python_file(str(file_path), ignored_findings, base_path)
     elif file_path.suffix in ['.yaml', '.yml']:
         with open(file_path, 'r') as f:
             content = f.read()
-        return scan_yaml_content(content, str(file_path))
+        return scan_yaml_content(content, str(file_path), ignored_findings, base_path)
     else:
+        # For unsupported file types, return an empty report
         return SecurityReport(
             findings=[],
             overall_risk=RiskLevel.LOW,

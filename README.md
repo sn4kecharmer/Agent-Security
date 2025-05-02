@@ -4,7 +4,7 @@ A command-line tool designed to scan LLM agent configurations and code (supporti
 
 ## Key Features
 
--   **Broad Framework Support:** Scans configurations and code for popular agent frameworks like LangChain and AutoGen.
+-   **Broad Framework Support:** Scans configurations and code for popular agent frameworks like LangChain, AutoGen, and **CrewAI**.
 -   **Multiple Format Analysis:** Supports direct scanning of Python (`.py`) files and YAML (`.yaml`, `.yml`) configuration files.
 -   **Code Intelligence:** Utilizes Abstract Syntax Trees (AST) for deeper, more accurate analysis of Python code to detect risky patterns and function calls.
 -   **Configuration Awareness:** Performs pattern matching within YAML files, including checking keys and values for insecure settings.
@@ -13,6 +13,7 @@ A command-line tool designed to scan LLM agent configurations and code (supporti
 -   **Detailed Reporting:** Generates reports highlighting findings with risk levels (Critical, High, Medium, Low), descriptions, impacts, line numbers, and remediation advice.
 -   **Flexible Output:** Provides reports in human-readable console format, JSON (`--output`), and CSV (`--output-csv`).
 -   **Risk Explanation:** Offers detailed explanations for different risk levels (`--explain`).
+-   **False Positive Management:** Allows ignoring specific findings via a `.agent_security_ignore` file.
 -   **CI/CD Integration:** Can be integrated into development pipelines to enforce security checks.
 
 ## Installation
@@ -117,6 +118,46 @@ The scanner checks for various security vulnerabilities and risky patterns, incl
 -   Risky tool descriptions indicating unsafe capabilities
 -   Use of temporary storage that might expose data (`/tmp/`)
 
+**CrewAI Specific:**
+-   Detection of CrewAI framework usage (`crewai_import`)
+-   Identification of Agent definitions (`crewai_agent`)
+-   Identification of Task definitions (`crewai_task`)
+-   Detection of Crew orchestration (`crewai_crew`)
+-   Detection of custom tool definitions using the `@tool` decorator (`crewai_tool_decorator`)
+-   Identification of autonomous execution methods (`kickoff()`, `process()`, `run()`)
+-   Detection of memory usage in agents that could lead to data persistence issues
+-   Identification of system command execution tools
+-   Analysis of human-in-the-loop vs. fully autonomous configurations
+
+## CrewAI Security Best Practices
+
+When using CrewAI, consider these security recommendations:
+
+1. **Tool Restrictions**:
+   - Limit tools to only those absolutely necessary
+   - Avoid tools that execute system commands or arbitrary code
+   - Implement input validation for all tool parameters
+
+2. **Human Oversight**:
+   - Use `human_in_the_loop=True` for sensitive operations
+   - Implement approval steps for critical actions
+   - Monitor agent activities and implement circuit breakers
+
+3. **Memory Management**:
+   - Sanitize sensitive data from agent memory
+   - Use ephemeral memory when possible
+   - Implement proper data lifecycle management
+
+4. **Execution Environment**:
+   - Run CrewAI agents in isolated containers
+   - Implement resource limits (CPU, memory, time)
+   - Use least-privilege principles for execution contexts
+
+5. **Input/Output Validation**:
+   - Validate all inputs to tasks and tools
+   - Sanitize outputs before using them in subsequent operations
+   - Implement content filtering for generated text
+
 ## Risk Levels
 
 Findings are categorized into the following risk levels:
@@ -125,6 +166,48 @@ Findings are categorized into the following risk levels:
 -   **HIGH**: Significant risk. Includes capabilities like unrestricted file system or network access, potential for severe data leaks, or use of dangerous configurations.
 -   **MEDIUM**: Moderate risk. May involve limited external access (e.g., specific APIs), potential information leakage through logging, or use of tools that require careful configuration.
 -   **LOW**: Minimal risk. Typically involves safe, isolated operations like calculations or restricted search.
+
+## Ignoring Findings (False Positives)
+
+You can instruct the scanner to ignore specific findings by creating a file named `.agent_security_ignore` in the root directory of your project (or the directory you are scanning). The scanner will automatically look for this file in the target directory and its parent directories.
+
+### Format
+
+Each line in the `.agent_security_ignore` file should specify a finding to ignore using the following format:
+
+```
+<relative_file_path>:<line_number>:<pattern_name>
+```
+
+-   `<relative_file_path>`: The path to the file containing the finding, relative to the location of the `.agent_security_ignore` file.
+-   `<line_number>`: The exact line number where the finding occurs.
+-   `<pattern_name>`: The name of the pattern reported by the scanner (e.g., `ShellTool`, `crewai_tool_decorator`, `verbose_logging`).
+
+### Example `.agent_security_ignore` File
+
+```
+# Ignore a specific ShellTool usage in a utility script
+utils/admin_scripts.py:42:ShellTool
+
+# Ignore verbose logging in a specific test file
+tests/integration/test_data_processing.py:105:verbose_logging
+
+# Ignore a known-safe custom CrewAI tool
+agents/custom_tools.py:25:crewai_tool_decorator
+
+# Ignore CrewAI agent in a test file
+tests/test_agents.py:15:crewai_agent
+```
+
+### Usage Notes
+
+- Lines starting with `#` are treated as comments and ignored.
+- Malformed entries will be skipped with a warning.
+- The scanner will look for `.agent_security_ignore` in the target directory and all parent directories.
+- Relative paths are resolved from the location of the `.agent_security_ignore` file.
+- When to use: For intentional, reviewed, and secured uses of potentially risky patterns.
+
+**Note:** Currently, the `.agent_security_ignore` mechanism is supported only when scanning local files and directories. It is **not** yet supported when scanning Git repositories directly via URL.
 
 ## Development
 

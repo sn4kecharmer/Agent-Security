@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any  # Added Dict, Any
 import datetime  # Added for timestamp in report processing
 import argparse
 from .models import RiskLevel
-from .scanner import scan_file, scan_git_repository
+from .scanner import scan_file, scan_git_repository, load_ignored_findings # Import load_ignored_findings
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
 
 app = typer.Typer(
@@ -80,7 +80,20 @@ def scan(
     Scan a configuration file for LLM agent tool usage and security risks.
     """
     try:
-        report = scan_file(str(file_path))
+        # Determine base path and load ignored findings for the typer command
+        target_path = Path(file_path)
+        if target_path.is_dir():
+             # TODO: Handle directory scanning in typer command if needed
+             console.print("[yellow]Warning:[/yellow] Directory scanning via the 'scan' command is not fully implemented for ignore files yet.")
+             base_path = target_path
+        elif target_path.is_file():
+            base_path = target_path.parent
+        else:
+             console.print(f"[red]Error:[/red] Invalid file path: {file_path}")
+             raise typer.Exit(1)
+
+        ignored_set = load_ignored_findings(base_path)
+        report = scan_file(str(file_path), ignored_set, base_path) # Pass ignored_set and base_path
 
         if output_json:
             console.print(json.dumps(report.to_dict(), indent=2))
@@ -255,14 +268,42 @@ def main(args):
         all_reports = []
         # Check if target is a Git repository URL
         if args.target.startswith(("http://", "https://", "git://")):
-            # Assuming scan_git_repository returns List[SecurityReport]
+            # TODO: Update scan_git_repository and GitScanner to handle ignore files
+            console.print("[yellow]Warning:[/yellow] Git repository scanning currently does not support .agent_security_ignore files.")
             all_reports = scan_git_repository(args.target, args.branch)
         else:
-            # Treat as file path
-            # Assuming scan_file returns SecurityReport
-            report = scan_file(args.target)
-            if report:
-                all_reports.append(report)
+            # Treat as local path (file or directory)
+            target_path = Path(args.target)
+            if target_path.is_file():
+                base_path = target_path.parent
+                ignored_set = load_ignored_findings(base_path)
+                report = scan_file(str(target_path), ignored_set, base_path)
+                if report:
+                    all_reports.append(report)
+            elif target_path.is_dir():
+                base_path = target_path
+                ignored_set = load_ignored_findings(base_path)
+                console.print(f"Scanning directory: {target_path}")
+                # Scan all Python and YAML files in the directory
+                for ext in ['*.py', '*.yaml', '*.yml']:
+                    # Use rglob for recursive search
+                    for file_p in target_path.rglob(ext):
+                         # Skip files within .git directories or other common ignores if needed
+                         if ".git" in file_p.parts:
+                              continue
+                         print(f"Scanning file: {file_p}")
+                         try:
+                              file_report = scan_file(str(file_p), ignored_set, base_path)
+                              if file_report and file_report.findings: # Only add reports with findings
+                                   all_reports.append(file_report)
+                         except FileNotFoundError:
+                              console.print(f"[yellow]Warning:[/yellow] Skipping file not found during directory scan: {file_p}")
+                         except Exception as e:
+                              console.print(f"[red]Error scanning file {file_p}:[/red] {e}")
+            else:
+                 console.print(f"[red]Error:[/red] Target path '{args.target}' is not a valid file, directory, or Git URL.")
+                 raise typer.Exit(1)
+
 
         # Prepare results for JSON output and CSV export
         processed_results_for_json = []

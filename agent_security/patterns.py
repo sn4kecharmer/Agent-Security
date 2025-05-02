@@ -139,6 +139,57 @@ TOOL_RISKS: Dict[str, SecurityInfo] = {
         remediation="1. Implement capability validation\n2. Add runtime monitoring\n3. Document loaded capabilities\n4. Use capability whitelisting",
         pattern=re.compile(r"DynamicTool")
     ),
+
+    # CrewAI-specific patterns
+    "crewai_import": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        description="CrewAI framework usage detected",
+        impact="CrewAI enables the creation of autonomous agents that can interact with tools, potentially leading to risks like arbitrary code execution, file system access, or network requests depending on the configured tools.",
+        remediation="1. Carefully review all tools provided to CrewAI agents.\n2. Implement strict allow-listing for tools and their capabilities.\n3. Monitor agent actions and tool usage.\n4. Sanitize inputs provided to tasks.\n5. Run agents in isolated environments (e.g., containers).",
+        pattern=re.compile(r"from\s+crewai|import\s+crewai")
+    ),
+    "crewai_agent": SecurityInfo(
+        risk_level=RiskLevel.HIGH, # Upgraded from MEDIUM as agents can have significant capabilities
+        description="CrewAI Agent definition",
+        impact="Agents can execute powerful operations through assigned tools, potentially accessing system resources, making network requests, or processing sensitive data without proper restrictions.",
+        remediation="1. Ensure agents are assigned only necessary tools.\n2. Review agent goals and backstories for potential misuse vectors.\n3. Limit agent permissions and resource access.\n4. Consider implementing human-in-the-loop oversight for sensitive operations.\n5. Monitor agent activities and implement circuit breakers.",
+        pattern=re.compile(r"Agent\(")
+    ),
+    "crewai_tool_decorator": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        description="CrewAI tool definition using decorator",
+        impact="Custom tools can introduce significant risks if they perform sensitive operations like shell commands, file access, or network requests without proper safeguards.",
+        remediation="1. Scrutinize the implementation of all custom tools.\n2. Apply principles of least privilege.\n3. Sanitize inputs passed to tools.\n4. Implement error handling and validation within tools.\n5. Avoid tools that execute arbitrary code or commands if possible.",
+        pattern=re.compile(r"@tool\s*\n+def|@tool\([^)]*\)\s*\n+def") # Matches @tool decorator
+    ),
+    "crewai_task": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        description="CrewAI Task definition",
+        impact="Tasks define the objectives and steps for agents. Maliciously crafted tasks or tasks using risky tools can lead to security incidents.",
+        remediation="1. Validate task descriptions and expected outputs.\n2. Ensure tasks utilize appropriate and vetted tools.\n3. Monitor task execution and agent interactions.\n4. Implement input validation for task parameters.",
+        pattern=re.compile(r"Task\(")
+    ),
+    "crewai_crew": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        description="CrewAI Crew orchestration",
+        impact="Crews orchestrate multiple agents working together, potentially amplifying security risks through complex interactions and tool usage across agents.",
+        remediation="1. Review all agents and tasks in the crew for security implications.\n2. Implement proper error handling and circuit breakers.\n3. Consider human-in-the-loop oversight for sensitive operations.\n4. Monitor crew execution and implement timeouts.\n5. Use the most restrictive set of tools necessary.",
+        pattern=re.compile(r"Crew\(")
+    ),
+    "crewai_autonomous": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        description="CrewAI autonomous execution",
+        impact="Fully autonomous execution without human oversight increases the risk of unintended consequences, data leakage, or resource abuse.",
+        remediation="1. Implement strict boundaries and guardrails.\n2. Add monitoring and alerting for unusual behavior.\n3. Consider adding human approval steps for sensitive operations.\n4. Implement resource limits and timeouts.\n5. Use sandboxing when possible.",
+        pattern=re.compile(r"kickoff\(|process\(|run\(")
+    ),
+    "crewai_memory": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        description="CrewAI agent with memory capabilities",
+        impact="Persistent memory in agents could lead to data leakage or unauthorized retention of sensitive information.",
+        remediation="1. Implement memory sanitization for sensitive data.\n2. Use ephemeral memory when possible.\n3. Implement proper data lifecycle management.\n4. Monitor memory usage for sensitive information patterns.\n5. Consider memory isolation between agent runs.",
+        pattern=re.compile(r"memory=|with_memory|memory_config")
+    ),
 }
 
 # YAML-specific tool patterns with security information
@@ -149,14 +200,14 @@ YAML_TOOL_PATTERNS = {
         description="Shell Command Execution Capability",
         impact="Can execute arbitrary system commands with the agent's privileges, potentially leading to system compromise, data theft, or service disruption",
         remediation="1. Remove shell access if not absolutely necessary\n2. Implement command allow-listing\n3. Use restricted execution environments\n4. Add command logging and monitoring\n5. Implement execution timeouts",
-        pattern=re.compile(r'shell_access|command_execution|system_access|terminal_access|exec|run_command|ShellTool')
+        pattern=re.compile(r'shell_access|command_execution|system_access|terminal_access|exec|run_command|ShellTool|shell') # Added 'shell'
     ),
     'python_exec': SecurityInfo(
         risk_level=RiskLevel.CRITICAL,
         description="Python Code Execution Capability",
         impact="Can execute arbitrary Python code, potentially leading to system compromise, library manipulation, or resource exhaustion",
         remediation="1. Disable Python execution if not required\n2. Use RestrictedPython for sandboxing\n3. Implement module allow-listing\n4. Add execution timeouts\n5. Monitor memory and CPU usage",
-        pattern=re.compile(r'PythonREPLTool|python_exec|code_execution')
+        pattern=re.compile(r'PythonREPLTool|python_exec|code_execution|python_repl') # Added 'python_repl'
     ),
     
     # High risk patterns

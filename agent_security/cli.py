@@ -10,10 +10,14 @@ from rich.console import Console
 from rich.table import Table # rich.table is used by typer scan and new table func
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.logging import RichHandler  # Added missing import
 from pathlib import Path
 from typing import Optional, List, Dict, Any  # Added Dict, Any
 import datetime  # Added for timestamp in report processing
 import argparse
+import re
+import logging
+import os
 try:
     from tabulate import tabulate
 except ImportError:
@@ -21,6 +25,19 @@ except ImportError:
 from .models import RiskLevel, SecurityInfo
 from .scanner import scan_file, scan_git_repository, load_ignored_findings, GET_allowed_actions, GET_contextual_risk_for_action # Import load_ignored_findings
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[
+        RichHandler(rich_tracebacks=True, markup=True),
+        logging.FileHandler("agent_security.log")
+    ]
+)
+
+logger = logging.getLogger("agent_security")
 
 app = typer.Typer(
     help="Agent Security Scanner - Analyze LLM agent configurations for security risks"
@@ -313,70 +330,100 @@ def format_results_as_table(findings_list: List[Dict[str, Any]], console_instanc
         padding=(0, 1),
         expand=True
     )
-    # Existing columns
+    # Add all columns including evidence and remediation
     table.add_column("File", style="cyan", no_wrap=False, overflow="fold")
     table.add_column("Line", justify="right", width=5)
     table.add_column("Description", style="italic", no_wrap=False, overflow="fold")
-    table.add_column("Confidence", width=10) # Using Risk Level as Confidence
-    # New columns
+    table.add_column("Evidence", style="yellow", no_wrap=False, overflow="fold")
     table.add_column("Remediation", style="green", no_wrap=False, overflow="fold")
-    table.add_column("Risk Description", style="red", no_wrap=False, overflow="fold") # 'Impact' from SecurityInfo
-    table.add_column("Evidence", no_wrap=False, overflow="fold") # 'context' from SecurityFinding
+    table.add_column("Risk Level", width=10)
 
     for finding in findings_list:
         pattern_name = finding.get("pattern")
-        # security_info_obj will be an instance of SecurityInfo from patterns.TOOL_RISKS
-        security_info_obj = TOOL_RISKS.get(pattern_name)
-
-        description_text = "N/A"
-        remediation_text = "N/A"
-        risk_description_text = "N/A" # Corresponds to security_info_obj.impact
-
-        if security_info_obj:
-            description_text = security_info_obj.description
-            remediation_text = security_info_obj.remediation
-            risk_description_text = security_info_obj.impact
-        elif pattern_name: # Fallback for custom/unknown patterns
-            description_text = f"Unknown/Custom: {pattern_name}"
-            remediation_text = "Review implementation and apply appropriate remediation."
-            risk_description_text = "Impact unknown due to custom/unknown pattern. Manual review required."
+        security_info = finding.get("security_info", {}) or {}
         
-        # evidence_data comes from the 'context' field of the finding
-        evidence_data = finding.get("context")
+        # Get description from security_info or tool patterns
+        description_text = security_info.get("description")
+        if not description_text:
+            tool_info = TOOL_RISKS.get(pattern_name) or YAML_TOOL_PATTERNS.get(pattern_name)
+            if tool_info:
+                description_text = tool_info.description
+            elif pattern_name:
+                description_text = f"Unknown/Custom: {pattern_name}"
+            else:
+                description_text = "N/A"
 
-        # Format all data for cells using the helper
-        formatted_description = _format_cell_data(description_text)
-        formatted_remediation = _format_cell_data(remediation_text)
+        # Get evidence from finding or security_info and clean it up
+        evidence_text = finding.get("evidence", "")
+        if not evidence_text:
+            evidence_text = security_info.get("evidence", "")
+        if not evidence_text:
+            evidence_text = finding.get("context", "")
+        if not evidence_text:
+            evidence_text = "N/A"
         
-        # Generate enhanced risk description
-        enhanced_risk_description = generate_enhanced_risk_description(
-            risk_description_text,
-            pattern_name,
-            evidence_data,
-            security_info_obj
-        )
-        formatted_risk_description = _format_cell_data(enhanced_risk_description)
-        formatted_evidence = _format_cell_data(evidence_data)
-        
-        # Prepare other existing data for the row
+        # Clean up evidence text
+        evidence_text = " ".join(evidence_text.split())  # Remove extra whitespace and newlines
+        evidence_text = evidence_text.strip()  # Remove leading/trailing whitespace
+
+        # Get remediation from security_info or tool patterns
+        remediation_text = security_info.get("remediation", "")
+        if not remediation_text:
+            tool_info = TOOL_RISKS.get(pattern_name) or YAML_TOOL_PATTERNS.get(pattern_name)
+            if tool_info:
+                remediation_text = tool_info.remediation
+            else:
+                remediation_text = "Review implementation and restrict access if needed"
+
         file_path_str = finding.get("file_path", "N/A")
         line_number_str = str(finding.get("line_number")) if finding.get("line_number") is not None else "N/A"
-        confidence_str = finding.get("risk_level", "N/A") # This is 'Confidence'
+        risk_level = finding.get("risk_level", "N/A")
+
+        # Color code the risk level
+        if risk_level == "CRITICAL":
+            risk_level = "[bold dark_red]CRITICAL[/bold dark_red]"
+        elif risk_level == "HIGH":
+            risk_level = "[bold pink]HIGH[/bold pink]"
+        elif risk_level == "MEDIUM":
+            risk_level = "[bold orange3]MEDIUM[/bold orange3]"
+        elif risk_level == "LOW":
+            risk_level = "[bold yellow]LOW[/bold yellow]"
 
         table.add_row(
             file_path_str,
             line_number_str,
-            formatted_description,
-            confidence_str,
-            formatted_remediation,
-            formatted_risk_description,
-            formatted_evidence
+            description_text,
+            evidence_text,
+            remediation_text,
+            risk_level
         )
     
     console_instance.print(table)
- 
- 
-# --- Main Execution Logic ---
+
+def sanitize_error(error: Exception) -> str:
+    """Sanitize error messages to prevent information leakage."""
+    error_str = str(error)
+    
+    # Remove file paths
+    error_str = re.sub(r'/[^\s]+', '[PATH]', error_str)
+    
+    # Remove potential tokens
+    error_str = re.sub(r'(api_key|secret_key|access_key|token|password):\s*[^\s]+', r'\1: [REDACTED]', error_str)
+    
+    return error_str
+
+def handle_error(error: Exception, verbose: bool = False) -> None:
+    """Handle errors with appropriate logging and user feedback."""
+    sanitized_error = sanitize_error(error)
+    
+    if verbose:
+        logger.error(f"Error: {sanitized_error}", exc_info=True)
+    else:
+        logger.error(f"Error: {sanitized_error}")
+        logger.info("Run with --verbose for more details")
+    
+    sys.exit(1)
+
 def main(args=None): # Allow args to be passed for testing, default to None for CLI use
     # console is defined globally
     parser = argparse.ArgumentParser(description="Scan agent configurations for security issues.")
@@ -407,8 +454,8 @@ def main(args=None): # Allow args to be passed for testing, default to None for 
     parser.add_argument(
         "--export-json",
         nargs='?',
-        const='scan_results.json',
-        default=None, # Important: default to None if flag not present
+        const='scan_results.json', # Default filename if no arg provided
+        default=None,
         metavar='FILEPATH',
         help="Export scan results to a JSON file. Defaults to 'scan_results.json' if no path is specified."
     )
@@ -538,10 +585,7 @@ def main(args=None): # Allow args to be passed for testing, default to None for 
 
 
     except Exception as e:
-        print(f"Error: {e}")
-        return 1
-
-    return 0
+        handle_error(e, args.explain)
 
 
 if __name__ == "__main__":

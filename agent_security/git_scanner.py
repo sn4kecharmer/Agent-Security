@@ -10,6 +10,19 @@ from pathlib import Path
 import git
 from .models import SecurityReport
 from .file_scanner import scan_file
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+def sanitize_git_error(error: Exception) -> str:
+    """Sanitize Git error messages to remove sensitive information."""
+    error_str = str(error)
+    # Remove potential tokens from URLs
+    error_str = re.sub(r'(https?://[^:]+:)[^@]+@', r'\1***@', error_str)
+    # Remove potential paths
+    error_str = re.sub(r'/[^\s]+', '***', error_str)
+    return error_str
 
 class GitScanner:
     """Scans agent configurations in a Git repository."""
@@ -29,21 +42,25 @@ class GitScanner:
 
     def __enter__(self):
         """Set up the temporary directory and clone the repository."""
-        self.temp_dir = tempfile.mkdtemp()
+        self.temp_dir = tempfile.mkdtemp(prefix='agent_security_')
         try:
             self.repo = git.Repo.clone_from(
                 self.repo_url,
                 self.temp_dir,
-                branch=self.branch if self.branch else None
+                branch=self.branch if self.branch else None,
+                depth=1
             )
         except git.exc.GitCommandError as e:
-            raise ValueError(f"Failed to clone repository: {e}")
+            raise ValueError(f"Failed to clone repository: {sanitize_git_error(e)}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Clean up the temporary directory."""
         if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
+            try:
+                shutil.rmtree(self.temp_dir)
+            except Exception as e:
+                logger.error(f"Failed to clean up temporary directory: {sanitize_git_error(e)}")
 
     def find_config_files(self) -> List[Path]:
         """

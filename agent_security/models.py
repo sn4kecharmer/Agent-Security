@@ -74,6 +74,26 @@ class SecurityFinding:
     security_info: Optional[SecurityInfo] = None
     file_path: Optional[str] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the finding to a dictionary for JSON/CSV output."""
+        return {
+            "pattern": self.pattern,
+            "risk_level": self.risk_level.value,
+            "line_number": self.line_number,
+            "context": self.context,
+            "security_info": {
+                "description": self.security_info.description,
+                "impact": self.security_info.impact,
+                "remediation": self.security_info.remediation,
+                "severity": self.security_info.severity,
+                "confidence": self.security_info.confidence,
+                "category": self.security_info.category,
+                "cwe": self.security_info.cwe,
+                "owasp": self.security_info.owasp
+            } if self.security_info else None,
+            "file_path": self.file_path
+        }
+
 @dataclass
 class SecurityReport:
     findings: List[SecurityFinding]

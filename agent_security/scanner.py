@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
+import os
 
 # --- False Positive Handling ---
 IGNORE_FILE_NAME = ".agent_security_ignore"
@@ -36,8 +37,6 @@ def load_ignored_findings(base_path: Path) -> Set[Tuple[str, int, str]]:
                 ignore_file_path = potential_path
                 break
             current_dir = current_dir.parent
-        else: # If loop completes without finding the file
-             ignore_file_path = base_path / IGNORE_FILE_NAME # Default back if not found upwards
 
     if ignore_file_path.is_file():
         try:
@@ -50,28 +49,56 @@ def load_ignored_findings(base_path: Path) -> Set[Tuple[str, int, str]]:
                     if len(parts) == 3:
                         file, line_num_str, pattern = parts
                         try:
-                            # Store relative path for comparison
-                            relative_file = str(Path(file).relative_to(ignore_file_path.parent))
-                            ignored.add((relative_file, int(line_num_str), pattern))
+                            # Convert line number to int
+                            line_num = int(line_num_str)
+                            # Store the file path relative to the ignore file's directory
+                            file_path = Path(file)
+                            if not file_path.is_absolute():
+                                file_path = ignore_file_path.parent / file_path
+                            relative_file = str(file_path.relative_to(ignore_file_path.parent))
+                            ignored.add((relative_file, line_num, pattern))
                         except (ValueError, TypeError):
-                            print(f"Warning: Skipping invalid ignore entry: {line}") # Handle potential errors converting line number
+                            print(f"Warning: Skipping invalid ignore entry: {line}")
                     else:
-                         print(f"Warning: Skipping malformed ignore entry: {line}")
+                        print(f"Warning: Skipping malformed ignore entry: {line}")
         except IOError as e:
             print(f"Warning: Could not read ignore file {ignore_file_path}: {e}")
     return ignored
 
 def is_finding_ignored(finding: SecurityFinding, ignored_set: Set[Tuple[str, int, str]], base_path: Path) -> bool:
-    """Checks if a finding is in the ignored set."""
+    """
+    Check if a finding should be ignored based on the ignore set.
+    
+    Args:
+        finding: The security finding to check
+        ignored_set: Set of ignored findings
+        base_path: The base path from which the scan was initiated
+        
+    Returns:
+        bool: True if the finding should be ignored
+    """
     try:
-        # Ensure comparison uses relative paths from the ignore file's perspective
-        relative_finding_path = str(Path(finding.file_path).relative_to(base_path))
-        return (relative_finding_path, finding.line_number, finding.pattern) in ignored_set
-    except ValueError:
-        # Handle cases where the finding path might not be relative to the base path
-        # This might happen with absolute paths or paths outside the project during git scans
-        # For now, we assume such findings are not ignored by a relative ignore file.
-        # A more robust solution might involve normalizing paths.
+        # Resolve both paths to their canonical form
+        finding_path = Path(finding.file_path).resolve(strict=True)
+        base_path = base_path.resolve(strict=True)
+        
+        # Get relative path from base_path
+        try:
+            relative_path = str(finding_path.relative_to(base_path))
+        except ValueError:
+            # If finding_path is not under base_path, use the original path
+            relative_path = str(finding_path)
+            
+        # Check if this finding matches any ignored pattern
+        for pattern, line, path in ignored_set:
+            if (pattern == finding.pattern and 
+                (line is None or line == finding.line_number) and
+                (path is None or path == relative_path)):
+                return True
+                
+        return False
+    except Exception as e:
+        logger.error(f"Error checking if finding is ignored: {sanitize_error(e)}")
         return False
 # --- End False Positive Handling ---
 
@@ -178,7 +205,7 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                                 line_number=node.lineno,
                                 context=context,
                                 security_info=TOOL_RISKS[pattern_key],
-                                file_path=file_path # Add file_path to finding
+                                file_path=file_path
                             )
                             if not is_finding_ignored(finding, ignored_findings, base_path):
                                 report.findings.append(finding)
@@ -188,7 +215,6 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                     if 'crewai' in full_module_name or module_base == 'crewai':
                         pattern_key = 'crewai_import'
                         if (pattern_key, node.lineno) not in processed_patterns:
-                             # Check if 'crewai_import' exists in TOOL_RISKS before accessing
                             if pattern_key in TOOL_RISKS:
                                 context = ast.get_source_segment(source, node)
                                 finding = SecurityFinding(
@@ -197,15 +223,85 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                                     line_number=node.lineno,
                                     context=context,
                                     security_info=TOOL_RISKS[pattern_key],
-                                    file_path=file_path # Add file_path to finding
+                                    file_path=file_path
                                 )
                                 if not is_finding_ignored(finding, ignored_findings, base_path):
                                     report.findings.append(finding)
                                 processed_patterns.add((pattern_key, node.lineno))
-                            else:
-                                # Handle case where pattern key might be missing (optional logging/warning)
-                                pass # Or log a warning: print(f"Warning: Pattern key '{pattern_key}' not found in TOOL_RISKS.")
 
+                    # CrewAI Memory Import Check
+                    if 'crewai.memory' in full_module_name or (module_base == 'crewai' and 'memory' in module_name):
+                        pattern_key = 'crewai_memory'
+                        if (pattern_key, node.lineno) not in processed_patterns:
+                            if pattern_key in TOOL_RISKS:
+                                context = ast.get_source_segment(source, node)
+                                finding = SecurityFinding(
+                                    pattern=pattern_key,
+                                    risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                    line_number=node.lineno,
+                                    context=context,
+                                    security_info=TOOL_RISKS[pattern_key],
+                                    file_path=file_path
+                                )
+                                if not is_finding_ignored(finding, ignored_findings, base_path):
+                                    report.findings.append(finding)
+                                processed_patterns.add((pattern_key, node.lineno))
+
+            # Check for memory usage in function calls and assignments
+            elif isinstance(node, (ast.Call, ast.Assign)):
+                # Check for memory usage in function calls
+                if isinstance(node, ast.Call):
+                    if hasattr(node.func, 'id') and node.func.id == 'Memory':
+                        pattern_key = 'crewai_memory'
+                        if (pattern_key, node.lineno) not in processed_patterns:
+                            context = ast.get_source_segment(source, node)
+                            finding = SecurityFinding(
+                                pattern=pattern_key,
+                                risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                line_number=node.lineno,
+                                context=context,
+                                security_info=TOOL_RISKS[pattern_key],
+                                file_path=file_path
+                            )
+                            if not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+                            processed_patterns.add((pattern_key, node.lineno))
+
+                # Check for memory usage in assignments
+                elif isinstance(node, ast.Assign):
+                    for keyword in ['memory', 'Memory']:
+                        if any(isinstance(target, ast.Name) and target.id == keyword for target in node.targets):
+                            pattern_key = 'crewai_memory'
+                            if (pattern_key, node.lineno) not in processed_patterns:
+                                context = ast.get_source_segment(source, node)
+                                finding = SecurityFinding(
+                                    pattern=pattern_key,
+                                    risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                    line_number=node.lineno,
+                                    context=context,
+                                    security_info=TOOL_RISKS[pattern_key],
+                                    file_path=file_path
+                                )
+                                if not is_finding_ignored(finding, ignored_findings, base_path):
+                                    report.findings.append(finding)
+                                processed_patterns.add((pattern_key, node.lineno))
+
+            # Check for memory usage in keyword arguments
+            elif isinstance(node, ast.keyword) and node.arg == 'memory':
+                pattern_key = 'crewai_memory'
+                if (pattern_key, node.lineno) not in processed_patterns:
+                    context = ast.get_source_segment(source, node)
+                    finding = SecurityFinding(
+                        pattern=pattern_key,
+                        risk_level=TOOL_RISKS[pattern_key].risk_level,
+                        line_number=node.lineno,
+                        context=context,
+                        security_info=TOOL_RISKS[pattern_key],
+                        file_path=file_path
+                    )
+                    if not is_finding_ignored(finding, ignored_findings, base_path):
+                        report.findings.append(finding)
+                    processed_patterns.add((pattern_key, node.lineno))
 
             # Check for tool usage and specific function calls
             elif isinstance(node, ast.Call):
@@ -497,7 +593,16 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
-    
+        
+    # Validate that file_path is within base_path
+    try:
+        file_path = file_path.resolve(strict=True)
+        base_path = base_path.resolve(strict=True)
+        if not str(file_path).startswith(str(base_path)):
+            raise ValueError(f"File {file_path} is outside the base directory {base_path}")
+    except Exception as e:
+        raise ValueError(f"Path validation failed: {e}")
+
     if file_path.suffix == '.py':
         return scan_python_file(str(file_path), ignored_findings, base_path)
     elif file_path.suffix in ['.yaml', '.yml']:
@@ -629,3 +734,147 @@ def scan_git_repository(repo_url: str, branch: Optional[str] = None) -> List[Sec
     except Exception as e:
         print(f"Error scanning Git repository {repo_url}: {e}")
     return reports
+
+class SecurityScanner:
+    """Main scanner class for analyzing agent configurations."""
+    
+    def __init__(self, base_path: str, ignore_patterns: Optional[List[str]] = None):
+        """Initialize scanner with base path and optional ignore patterns."""
+        self.base_path = os.path.abspath(base_path)
+        self.ignore_patterns = ignore_patterns or []
+        self.file_scanner = FileScanner()
+        self.max_depth = 10  # Limit directory traversal depth
+        self.max_files = 1000  # Limit total files to scan
+        self.file_count = 0
+        self.current_depth = 0
+        
+    def scan(self) -> SecurityReport:
+        """Scan the target path for security issues."""
+        logger.info(f"Starting security scan of {self.base_path}")
+        report = SecurityReport()
+        
+        try:
+            if not os.path.exists(self.base_path):
+                raise FileNotFoundError(f"Path not found: {self.base_path}")
+                
+            if not os.path.isdir(self.base_path):
+                # Single file scan
+                self._scan_file(self.base_path, report)
+            else:
+                # Directory scan
+                self._scan_directory(self.base_path, report)
+                
+            return report
+            
+        except Exception as e:
+            logger.error(f"Error during scan: {sanitize_error(e)}")
+            raise
+            
+    def _scan_directory(self, directory: str, report: SecurityReport) -> None:
+        """Recursively scan a directory."""
+        if self.current_depth > self.max_depth:
+            logger.warning(f"Maximum directory depth reached: {directory}")
+            return
+            
+        if self.file_count >= self.max_files:
+            logger.warning("Maximum file count reached")
+            return
+            
+        self.current_depth += 1
+        try:
+            for root, dirs, files in os.walk(directory):
+                # Skip hidden directories
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                
+                for file in files:
+                    if self.file_count >= self.max_files:
+                        return
+                        
+                    # Skip hidden files
+                    if file.startswith('.'):
+                        continue
+                        
+                    file_path = os.path.join(root, file)
+                    self._scan_file(file_path, report)
+                    self.file_count += 1
+        finally:
+            self.current_depth -= 1
+
+    def validate_file_path(self, file_path: str) -> str:
+        """Validate and sanitize file path."""
+        try:
+            # Convert to absolute path
+            abs_path = os.path.abspath(file_path)
+            
+            # Check if path exists
+            if not os.path.exists(abs_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            
+            # Check if path is under base path
+            if not abs_path.startswith(self.base_path):
+                raise ValueError(f"File path {file_path} is outside base directory")
+            
+            # Check file permissions
+            if not os.access(abs_path, os.R_OK):
+                raise PermissionError(f"No read permission for file: {file_path}")
+            
+            return abs_path
+        
+        except Exception as e:
+            logger.error(f"Path validation error: {sanitize_error(e)}")
+            raise
+
+    def validate_file_content(self, content: str, file_path: str) -> None:
+        """Validate file content."""
+        try:
+            # Check for null bytes
+            if '\0' in content:
+                raise ValueError(f"File {file_path} contains null bytes")
+            
+            # Check for binary content
+            if not all(ord(c) < 128 for c in content):
+                raise ValueError(f"File {file_path} appears to be binary")
+            
+            # Check for maximum line length
+            max_line_length = 10000
+            for i, line in enumerate(content.splitlines(), 1):
+                if len(line) > max_line_length:
+                    raise ValueError(f"Line {i} in {file_path} exceeds maximum length of {max_line_length}")
+                
+        except Exception as e:
+            logger.error(f"Content validation error: {sanitize_error(e)}")
+            raise
+
+    def _scan_file(self, file_path: str, report: SecurityReport) -> None:
+        """Scan a single file for security issues."""
+        try:
+            # Validate file path
+            abs_path = self.validate_file_path(file_path)
+            
+            # Skip ignored files
+            if self.is_finding_ignored(abs_path):
+                logger.debug(f"Skipping ignored file: {abs_path}")
+                return
+            
+            # Read and validate file content
+            with open(abs_path, 'r') as f:
+                content = f.read()
+            self.validate_file_content(content, abs_path)
+            
+            # Scan file based on type
+            if abs_path.endswith('.py'):
+                findings = self.file_scanner.scan_python_file(abs_path)
+            elif abs_path.endswith(('.yaml', '.yml')):
+                findings = self.file_scanner.scan_yaml_file(abs_path)
+            else:
+                logger.debug(f"Skipping unsupported file type: {abs_path}")
+                return
+            
+            # Add findings to report
+            for finding in findings:
+                if not self.is_finding_ignored(finding):
+                    report.add_finding(finding)
+                
+        except Exception as e:
+            logger.error(f"Error scanning file {file_path}: {sanitize_error(e)}")
+            raise

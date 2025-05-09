@@ -10,10 +10,23 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
 from .models import SecurityReport, SecurityInfo, ToolUsage
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Maximum file size in bytes (e.g., 10MB)
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+def check_file_size(file_path: str) -> None:
+    """Check if file size is within acceptable limits."""
+    try:
+        size = os.path.getsize(file_path)
+        if size > MAX_FILE_SIZE:
+            raise ValueError(f"File {file_path} exceeds maximum size limit of {MAX_FILE_SIZE} bytes")
+    except OSError as e:
+        raise ValueError(f"Error checking file size: {sanitize_error(e)}")
 
 class ToolVisitor(ast.NodeVisitor):
     """AST visitor to find tool usage in Python code."""
@@ -69,7 +82,7 @@ def scan_python_file(file_path: str) -> SecurityReport:
     report = SecurityReport()
     
     try:
-        # Read the entire file content first
+        check_file_size(file_path)
         with open(file_path, 'r') as f:
             source = f.read()
             logger.debug(f"Successfully read file: {file_path}")
@@ -188,9 +201,10 @@ def scan_yaml_file(file_path: str) -> SecurityReport:
     """
     logger.debug(f"Scanning YAML file: {file_path}")
     report = SecurityReport()
-    yaml = ruamel.yaml.YAML()
+    yaml = ruamel.yaml.YAML(typ='safe')
     
     try:
+        check_file_size(file_path)
         with open(file_path, 'r') as f:
             content = f.read()
             source_lines = content.splitlines()

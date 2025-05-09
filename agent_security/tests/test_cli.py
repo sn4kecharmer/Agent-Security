@@ -4,6 +4,8 @@ from unittest import mock
 import json
 import sys
 from pathlib import Path
+import re
+import datetime
 
 # Assuming cli.py is in the parent directory relative to the tests directory
 # For direct execution or if agent_security is installed, this might need adjustment.
@@ -14,6 +16,9 @@ from agent_security.models import SecurityReport, SecurityFinding, RiskLevel, Se
 # A console object mock to be used in tests
 console_mock = mock.MagicMock()
 
+# Fixed timestamp for all tests
+FIXED_TIMESTAMP = "2025-05-08T22:30:33.690348"
+
 # Sample scan results to be used in multiple tests
 SAMPLE_FINDING_1 = SecurityFinding(
     pattern="os.system",
@@ -21,6 +26,8 @@ SAMPLE_FINDING_1 = SecurityFinding(
     risk_level=RiskLevel.CRITICAL,
     context="os.system('rm -rf /')",
     security_info=SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile("os.system"),
         description="Allows arbitrary command execution.",
         impact="System compromise.",
         remediation="Avoid os.system."
@@ -32,6 +39,8 @@ SAMPLE_FINDING_2 = SecurityFinding(
     risk_level=RiskLevel.MEDIUM,
     context="requests.get(user_url)",
     security_info=SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile("requests.get"),
         description="Makes HTTP GET requests.",
         impact="Data exfiltration or SSRF if URL is user-controlled.",
         remediation="Validate URLs."
@@ -40,31 +49,117 @@ SAMPLE_FINDING_2 = SecurityFinding(
 SAMPLE_REPORT_SINGLE_FILE = SecurityReport(
     file_path="test_file.py",
     findings=[SAMPLE_FINDING_1, SAMPLE_FINDING_2],
-    overall_risk=RiskLevel.CRITICAL
+    overall_risk=RiskLevel.CRITICAL,
+    timestamp=FIXED_TIMESTAMP
 )
 SAMPLE_REPORT_EMPTY = SecurityReport(
     file_path="empty_file.py",
     findings=[],
-    overall_risk=RiskLevel.LOW
+    overall_risk=RiskLevel.LOW,
+    timestamp=FIXED_TIMESTAMP
 )
 
 # Convert sample reports to the dictionary format expected by some parts of cli.py
 PROCESSED_SAMPLE_RESULTS_SINGLE = [SAMPLE_REPORT_SINGLE_FILE.to_dict()]
 FLAT_SAMPLE_FINDINGS_SINGLE = [
-    {**SAMPLE_FINDING_1.to_dict(), "file_path": "test_file.py"},
-    {**SAMPLE_FINDING_2.to_dict(), "file_path": "test_file.py"}
+    {
+        "pattern": "os.system",
+        "risk_level": "CRITICAL",
+        "line_number": 10,
+        "context": "os.system('rm -rf /')",
+        "security_info": {
+            "description": "Allows arbitrary command execution.",
+            "impact": "System compromise.",
+            "remediation": "Avoid os.system.",
+            "severity": "🔴",
+            "confidence": "High",
+            "category": "",
+            "cwe": [],
+            "owasp": []
+        },
+        "file_path": "test_file.py"
+    },
+    {
+        "pattern": "requests.get",
+        "risk_level": "MEDIUM",
+        "line_number": 25,
+        "context": "requests.get(user_url)",
+        "security_info": {
+            "description": "Makes HTTP GET requests.",
+            "impact": "Data exfiltration or SSRF if URL is user-controlled.",
+            "remediation": "Validate URLs.",
+            "severity": "🟡",
+            "confidence": "High",
+            "category": "",
+            "cwe": [],
+            "owasp": []
+        },
+        "file_path": "test_file.py"
+    }
 ]
-JSON_OUTPUT_SINGLE_FILE_SCAN = SAMPLE_REPORT_SINGLE_FILE.to_dict() # main() outputs single dict for single file
+JSON_OUTPUT_SINGLE_FILE_SCAN = {
+    "findings": [
+        {
+            "pattern": "os.system",
+            "risk_level": "CRITICAL",
+            "line_number": 10,
+            "context": "os.system('rm -rf /')",
+            "security_info": {
+                "description": "Allows arbitrary command execution.",
+                "impact": "System compromise.",
+                "remediation": "Avoid os.system.",
+                "severity": "🔴",
+                "confidence": "High",
+                "category": "",
+                "cwe": [],
+                "owasp": []
+            },
+            "file_path": "test_file.py"
+        },
+        {
+            "pattern": "requests.get",
+            "risk_level": "MEDIUM",
+            "line_number": 25,
+            "context": "requests.get(user_url)",
+            "security_info": {
+                "description": "Makes HTTP GET requests.",
+                "impact": "Data exfiltration or SSRF if URL is user-controlled.",
+                "remediation": "Validate URLs.",
+                "severity": "🟡",
+                "confidence": "High",
+                "category": "",
+                "cwe": [],
+                "owasp": []
+            },
+            "file_path": "test_file.py"
+        }
+    ],
+    "overall_risk": "CRITICAL",
+    "file_path": "test_file.py",
+    "timestamp": FIXED_TIMESTAMP,
+    "metadata": {}
+}
 
 PROCESSED_SAMPLE_RESULTS_EMPTY = [SAMPLE_REPORT_EMPTY.to_dict()]
 FLAT_SAMPLE_FINDINGS_EMPTY = []
-JSON_OUTPUT_EMPTY_FILE_SCAN = SAMPLE_REPORT_EMPTY.to_dict()
+JSON_OUTPUT_EMPTY_FILE_SCAN = {
+    "findings": [],
+    "overall_risk": "LOW",
+    "file_path": "empty_file.py",
+    "timestamp": FIXED_TIMESTAMP,
+    "metadata": {}
+}
 
 
 class TestCliArgParsing(unittest.TestCase):
     """Tests for argument parsing in cli.py's main function."""
 
     def setUp(self):
+        # Mock datetime to return fixed timestamp
+        self.datetime_patcher = mock.patch('datetime.datetime')
+        self.mock_datetime = self.datetime_patcher.start()
+        self.mock_datetime.now.return_value.isoformat.return_value = FIXED_TIMESTAMP
+
         # This parser is similar to the one in cli.main()
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument(
@@ -281,6 +376,63 @@ class TestCliOutputLogic(unittest.TestCase):
         self.mock_console_print.assert_not_any_call(f"Results exported to [green]some_file.json[/green]")
         self.mock_format_results_as_table.assert_not_called()
 
+    def test_csv_output_single_file(self):
+        """Test CSV output for a single file scan."""
+        csv_output_path = "output.csv"
+        cli.main(["test_file.py", "--output-csv", csv_output_path])
+        self.mock_scan_file.assert_called_once_with("test_file.py", set(), Path("."))
+        
+        # Check that generate_csv_report was called with correct arguments
+        self.mock_generate_csv_report.assert_called_once()
+        args, _ = self.mock_generate_csv_report.call_args
+        findings_list, output_path = args
+        
+        # Verify findings list structure matches expected format
+        self.assertEqual(findings_list, FLAT_SAMPLE_FINDINGS_SINGLE)
+        self.assertEqual(output_path, csv_output_path)
+        
+        # Verify default table output still occurs
+        self.mock_format_results_as_table.assert_called_once()
+
+    def test_csv_output_empty_results(self):
+        """Test CSV output when scan results are empty."""
+        self.mock_scan_file.return_value = SAMPLE_REPORT_EMPTY
+        csv_output_path = "empty_output.csv"
+        cli.main(["empty_file.py", "--output-csv", csv_output_path])
+        
+        # Check generate_csv_report was called with empty findings list
+        self.mock_generate_csv_report.assert_called_once()
+        args, _ = self.mock_generate_csv_report.call_args
+        findings_list, output_path = args
+        
+        self.assertEqual(findings_list, FLAT_SAMPLE_FINDINGS_EMPTY)
+        self.assertEqual(output_path, csv_output_path)
+
+    def test_csv_output_with_json_stdout(self):
+        """Test CSV output combined with JSON stdout output."""
+        csv_output_path = "output.csv"
+        cli.main(["test_file.py", "--output-csv", csv_output_path, "--json-stdout"])
+        
+        # Both CSV and JSON output should be generated
+        self.mock_generate_csv_report.assert_called_once()
+        expected_json_str = json.dumps(JSON_OUTPUT_SINGLE_FILE_SCAN, indent=2) + '\n'
+        self.mock_sys_stdout_write.assert_called_once_with(expected_json_str)
+
+    def test_csv_output_with_json_export(self):
+        """Test CSV output combined with JSON file export."""
+        csv_output_path = "output.csv"
+        json_output_path = "output.json"
+        cli.main(["test_file.py", "--output-csv", csv_output_path, "--export-json", json_output_path])
+        
+        # Both CSV and JSON files should be generated
+        self.mock_generate_csv_report.assert_called_once()
+        self.mock_open.assert_any_call(json_output_path, "w", encoding="utf-8")
+        
+        # Verify JSON content
+        file_handle = self.mock_open.return_value.__enter__.return_value
+        expected_json_str = json.dumps(JSON_OUTPUT_SINGLE_FILE_SCAN, indent=2)
+        file_handle.write.assert_any_call(expected_json_str)
+
     # Placeholder for testing the actual format_results_as_table function's output
     # This would involve capturing Rich's output, which can be complex.
     # For now, we're testing that it's *called* correctly.
@@ -337,9 +489,27 @@ class TestFormatResultsAsTable(unittest.TestCase):
 
         # Mock TOOL_RISKS used internally by format_results_as_table
         with mock.patch.dict(cli.TOOL_RISKS, {
-            "os.system": SecurityInfo(description="Arbitrary command execution", impact="", remediation=""),
-            "some_tool": SecurityInfo(description="Some tool description", impact="", remediation=""),
-            "another_tool": SecurityInfo(description="Another tool description", impact="", remediation=""),
+            "os.system": SecurityInfo(
+                risk_level=RiskLevel.CRITICAL,
+                pattern=re.compile("os.system"),
+                description="Arbitrary command execution",
+                impact="",
+                remediation=""
+            ),
+            "some_tool": SecurityInfo(
+                risk_level=RiskLevel.HIGH,
+                pattern=re.compile("some_tool"),
+                description="Some tool description",
+                impact="",
+                remediation=""
+            ),
+            "another_tool": SecurityInfo(
+                risk_level=RiskLevel.MEDIUM,
+                pattern=re.compile("another_tool"),
+                description="Another tool description",
+                impact="",
+                remediation=""
+            ),
         }, clear=True):
             cli.format_results_as_table(sample_flat_findings, self.mock_console)
 
@@ -383,7 +553,13 @@ class TestFormatResultsAsTable(unittest.TestCase):
             }
         ]
         with mock.patch.dict(cli.TOOL_RISKS, {
-            "comma_tool": SecurityInfo(description="This, is, a, description, with, commas", impact="", remediation=""),
+            "comma_tool": SecurityInfo(
+                risk_level=RiskLevel.LOW,
+                pattern=re.compile("comma_tool"),
+                description="This, is, a, description, with, commas",
+                impact="",
+                remediation=""
+            ),
         }, clear=True):
             cli.format_results_as_table(finding_with_comma, self.mock_console)
 
@@ -391,6 +567,130 @@ class TestFormatResultsAsTable(unittest.TestCase):
             "file_comma.py", "15", "This, is, a, description, with, commas", "LOW"
         )
         self.mock_console.print.assert_called_once_with(self.mock_table_instance)
+
+
+class TestGenerateCSVReport(unittest.TestCase):
+    """Tests for the CSV report generation functionality."""
+
+    def setUp(self):
+        self.mock_open = mock.patch('builtins.open', new_callable=mock.mock_open).start()
+        self.mock_csv_writer = mock.MagicMock()
+        self.mock_csv = mock.patch('csv.writer', return_value=self.mock_csv_writer).start()
+        self.mock_print = mock.patch('builtins.print').start()
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_generate_csv_empty_findings(self):
+        """Test CSV generation with empty findings list."""
+        cli.generate_csv_report([], "empty.csv")
+        
+        # Check file was opened correctly
+        self.mock_open.assert_called_once_with("empty.csv", "w", newline="", encoding="utf-8")
+        
+        # Check header was written
+        expected_header = [
+            "file_path",
+            "line_number",
+            "finding_type",
+            "severity",
+            "description",
+            "pattern_id",
+            "impact",
+            "remediation",
+        ]
+        self.mock_csv_writer.writerow.assert_called_once_with(expected_header)
+        
+        # Check success message
+        self.mock_print.assert_called_once_with("No findings detected. Empty CSV created at empty.csv")
+
+    def test_generate_csv_with_findings(self):
+        """Test CSV generation with sample findings."""
+        findings = [
+            {
+                "file_path": "test_file.py",
+                "line_number": 10,
+                "pattern": "os.system",
+                "risk_level": "CRITICAL",
+                "context": "os.system('rm -rf /')",
+                "security_info": {
+                    "description": "Allows arbitrary command execution.",
+                    "impact": "System compromise.",
+                    "remediation": "Avoid os.system."
+                }
+            }
+        ]
+        
+        cli.generate_csv_report(findings, "output.csv")
+        
+        # Check file was opened correctly
+        self.mock_open.assert_called_once_with("output.csv", "w", newline="", encoding="utf-8")
+        
+        # Check header and data were written
+        calls = self.mock_csv_writer.writerow.call_args_list
+        expected_header = [
+            "file_path",
+            "line_number",
+            "finding_type",
+            "severity",
+            "description",
+            "pattern_id",
+            "impact",
+            "remediation",
+        ]
+        self.assertEqual(calls[0][0][0], expected_header)
+        
+        # Check data row
+        expected_data = [
+            "test_file.py",
+            10,
+            "os.system",
+            "CRITICAL",
+            "Allows arbitrary command execution.",
+            "System compromise. - os.system('rm -rf /')",
+            "Avoid os.system.",
+            "os.system"
+        ]
+        self.assertEqual(calls[1][0][0], expected_data)
+        
+        # Check success message
+        self.mock_print.assert_called_once_with("CSV report successfully generated at: output.csv")
+
+    def test_generate_csv_with_missing_fields(self):
+        """Test CSV generation with findings that have missing fields."""
+        findings = [
+            {
+                "file_path": "test_file.py",
+                "pattern": "os.system",
+                # Missing line_number and other fields
+                "security_info": None
+            }
+        ]
+        
+        cli.generate_csv_report(findings, "missing_fields.csv")
+        
+        # Check file was opened correctly
+        self.mock_open.assert_called_once_with("missing_fields.csv", "w", newline="", encoding="utf-8")
+        
+        # Check data row handles missing fields gracefully
+        calls = self.mock_csv_writer.writerow.call_args_list
+        data_row = calls[1][0][0]
+        self.assertEqual(data_row[0], "test_file.py")  # file_path present
+        self.assertEqual(data_row[1], "")  # line_number missing
+        self.assertEqual(data_row[2], "os.system")  # pattern present
+        self.assertEqual(data_row[4], "")  # description missing
+        
+        # Check success message
+        self.mock_print.assert_called_once_with("CSV report successfully generated at: missing_fields.csv")
+
+    def test_generate_csv_io_error(self):
+        """Test CSV generation when an IO error occurs."""
+        self.mock_open.side_effect = IOError("Permission denied")
+        
+        cli.generate_csv_report([], "error.csv")
+        
+        # Check error message
+        self.mock_print.assert_called_once_with("Error: Could not write CSV file to error.csv. Reason: Permission denied")
 
 
 if __name__ == "__main__":

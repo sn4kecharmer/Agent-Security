@@ -4,3 +4,4 @@ pyyaml>=6.0.1
 astroid>=3.0.0
 gitpython>=3.1.40
 ruamel.yaml>=0.17.40 
+tabulate

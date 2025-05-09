@@ -1,2 +1,5 @@
 *.csv
 *.cursorrules
+enhanced_risk_description_plan.md
+.gitignore
+penetration_test_report_agent_security.md

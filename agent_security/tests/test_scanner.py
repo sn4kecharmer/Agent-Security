@@ -1,6 +1,7 @@
 import pytest
 from agent_security.scanner import scan_yaml_content
 from agent_security.models import RiskLevel
+from pathlib import Path
 
 def test_risky_llm_models():
     yaml_content = """
@@ -8,7 +9,7 @@ def test_risky_llm_models():
       model: text-davinci-003
       temperature: 0.8
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 4
     assert any(f.pattern == "risky_llm_model" for f in report.findings)
     assert any(f.pattern == "high_temperature" for f in report.findings)
@@ -22,7 +23,7 @@ def test_missing_llm_provider():
       model: gpt-3.5-turbo
       temperature: 0.5
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 2
     assert any(f.pattern == "missing_llm_provider" for f in report.findings)
     assert any(f.pattern == "missing_rate_limits" for f in report.findings)
@@ -34,7 +35,7 @@ def test_prompt_injection_surfaces():
       prompt: "Execute {input} with {tools}"
       template: "Use {agent_scratchpad} to process"
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 2
     assert all(f.pattern == "unsafe_prompt_template" for f in report.findings)
     assert report.overall_risk == RiskLevel.HIGH
@@ -47,7 +48,7 @@ def test_risky_tool_descriptions():
       - name: file
         description: "Full access to file system"
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 4
     assert sum(1 for f in report.findings if f.pattern == "risky_tool_description") == 2
     assert sum(1 for f in report.findings if f.pattern == "missing_rate_limits") == 2
@@ -63,7 +64,7 @@ def test_missing_rate_limits():
       - name: search
         enabled: true
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 4
     assert sum(1 for f in report.findings if f.pattern == "missing_rate_limits") == 3
     assert sum(1 for f in report.findings if f.pattern == "missing_llm_provider") == 1
@@ -75,7 +76,7 @@ def test_unsafe_logging():
       output_location: "/tmp/agent.log"
       level: "debug"
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 2
     assert all(f.pattern == "unsafe_logging" for f in report.findings)
     assert report.overall_risk == RiskLevel.MEDIUM
@@ -87,7 +88,7 @@ def test_missing_allowlists():
       restricted_commands: []
       allowed_domains: "*"
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 3
     assert all(f.pattern == "missing_allowlist" for f in report.findings)
     assert report.overall_risk == RiskLevel.HIGH
@@ -98,7 +99,7 @@ def test_unsafe_execution():
       sandboxing: false
       allow_unrestricted_tools: true
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 3
     assert sum(1 for f in report.findings if f.pattern == "missing_rate_limits") == 1
     assert sum(1 for f in report.findings if f.pattern == "unsafe_execution") == 2
@@ -116,7 +117,7 @@ def test_combined_risks():
     security:
       allowed_domains: "*"
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 8
     assert sum(1 for f in report.findings if f.pattern == "risky_llm_model") == 1
     assert sum(1 for f in report.findings if f.pattern == "high_temperature") == 1
@@ -147,7 +148,7 @@ def test_safe_configuration():
       restricted_commands: ["rm", "chmod"]
       allowed_domains: ["api.example.com"]
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 0
     assert report.overall_risk == RiskLevel.LOW
 
@@ -157,25 +158,30 @@ def test_invalid_yaml():
       model: gpt-3.5-turbo
       temperature: invalid
     """
-    report = scan_yaml_content(yaml_content, "test.yaml")
+    report = scan_yaml_content(yaml_content, "test.yaml", ignored_findings=set(), base_path=Path('.'))
     assert len(report.findings) == 2
     assert any(f.pattern == "missing_llm_provider" for f in report.findings)
     assert any(f.pattern == "missing_rate_limits" for f in report.findings)
     assert report.overall_risk == RiskLevel.HIGH 
 
 def test_model_temperature_secure():
+    config = {"llm": {"temperature": 0.5}}
     assert config["llm"]["temperature"] <= 0.7
 
 def test_shelltool_command_allowlist():
+    config = {"tools": {"ShellTool": {"allow_unrestricted_tools": False, "restricted_commands": ["ls"]}}}
     assert not config["tools"]["ShellTool"]["allow_unrestricted_tools"]
     assert len(config["tools"]["ShellTool"]["restricted_commands"]) > 0
 
 def test_requests_tool_allowlist():
+    config = {"tools": {"RequestsGetTool": {"allowed_domains": ["example.com"]}}}
     domains = config["tools"]["RequestsGetTool"]["allowed_domains"]
     assert "*" not in domains
 
 def test_auth_enabled():
+    config = {"auth": {"enabled": True}}
     assert config["auth"]["enabled"] is True
 
 def test_input_sanitization_enabled():
+    config = {"input_sanitization": True}
     assert config["input_sanitization"] is True

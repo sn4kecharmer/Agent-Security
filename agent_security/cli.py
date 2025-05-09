@@ -3,18 +3,23 @@ Command-line interface for the Agent Security Scanner.
 """
 
 import json
+import sys # Added for sys.stdout
 import typer
 import csv  # Added for CSV export
 from rich.console import Console
-from rich.table import Table
+from rich.table import Table # rich.table is used by typer scan and new table func
 from rich.panel import Panel
 from rich.markdown import Markdown
 from pathlib import Path
 from typing import Optional, List, Dict, Any  # Added Dict, Any
 import datetime  # Added for timestamp in report processing
 import argparse
-from .models import RiskLevel
-from .scanner import scan_file, scan_git_repository, load_ignored_findings # Import load_ignored_findings
+try:
+    from tabulate import tabulate
+except ImportError:
+    tabulate = None # Handle missing library later
+from .models import RiskLevel, SecurityInfo
+from .scanner import scan_file, scan_git_repository, load_ignored_findings, GET_allowed_actions, GET_contextual_risk_for_action # Import load_ignored_findings
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
 
 app = typer.Typer(
@@ -235,7 +240,145 @@ def generate_csv_report(findings_list: List[Dict[str, Any]], output_filepath: st
         print(f"An unexpected error occurred during CSV generation: {e}")
 
 
-def main(args):
+# --- Table Formatting ---
+def format_output_table(findings_list: List[Dict[str, Any]]) -> str:
+    """Formats findings into a text-based table."""
+    if not findings_list:
+        return "No vulnerabilities found."
+
+    if tabulate is None:
+        return "Error: 'tabulate' library not found. Please install it (`pip install tabulate`) to use table format."
+
+    headers = ["File Path", "Line", "Pattern Name", "Severity", "Description"] # Matched Text not directly available in flat list
+    table_data = []
+    for finding in findings_list:
+        # Extract data safely using .get()
+        security_info = finding.get("security_info", {}) or {}
+        table_data.append([
+            finding.get("file_path", "N/A"),
+            finding.get("line_number", "N/A"),
+            finding.get("pattern", "N/A"), # Using pattern as Pattern Name
+            finding.get("risk_level", "N/A"), # Using risk_level as Severity
+            security_info.get("description", "N/A")[:100] + ('...' if len(security_info.get("description", "")) > 100 else '') # Use description, truncated
+        ])
+
+    # TDD Anchor: Test table generation with various inputs.
+    return tabulate(table_data, headers=headers, tablefmt="grid")
+ 
+ 
+# Helper function for formatting cell data
+def _format_cell_data(data: Any) -> str:
+    if data is None:
+        return "N/A"
+    if isinstance(data, list):
+        # Ensure all items are strings before joining, and filter out None items
+        return ", ".join(str(item) for item in data if item is not None)
+    return str(data)
+
+# --- Enhanced Risk Description Function ---
+def generate_enhanced_risk_description(
+    original_risk_description: str,
+    pattern_name: Optional[str],
+    content_context: Optional[str], # This is 'evidence_data'
+    security_info: Optional[SecurityInfo] # This is 'security_info_obj'
+) -> str:
+    """
+    Generates an enhanced risk description if the original is "Impact unknown...".
+    """
+    if original_risk_description == "Impact unknown due to custom/unknown pattern. Manual review required.":
+        # Pass pattern_details (security_info) to GET_allowed_actions
+        allowed_actions = GET_allowed_actions(security_info, content_context, pattern_name)
+        
+        if allowed_actions:
+            enhancements = []
+            for action in allowed_actions:
+                contextual_risk = GET_contextual_risk_for_action(action)
+                if contextual_risk:
+                    enhancements.append(f"- Action '{action}': {contextual_risk}")
+            
+            if enhancements:
+                return f"{original_risk_description}\nPotential inferred actions and risks:\n" + "\n".join(enhancements)
+    return original_risk_description
+# --- End Enhanced Risk Description Function ---
+
+def format_results_as_table(findings_list: List[Dict[str, Any]], console_instance: Console):
+    """Formats findings into a rich table and prints it."""
+    if not findings_list:
+        console_instance.print("No vulnerabilities found.")
+        return
+
+    table = Table(
+        title="Scan Results",
+        show_lines=True,
+        padding=(0, 1),
+        expand=True
+    )
+    # Existing columns
+    table.add_column("File", style="cyan", no_wrap=False, overflow="fold")
+    table.add_column("Line", justify="right", width=5)
+    table.add_column("Description", style="italic", no_wrap=False, overflow="fold")
+    table.add_column("Confidence", width=10) # Using Risk Level as Confidence
+    # New columns
+    table.add_column("Remediation", style="green", no_wrap=False, overflow="fold")
+    table.add_column("Risk Description", style="red", no_wrap=False, overflow="fold") # 'Impact' from SecurityInfo
+    table.add_column("Evidence", no_wrap=False, overflow="fold") # 'context' from SecurityFinding
+
+    for finding in findings_list:
+        pattern_name = finding.get("pattern")
+        # security_info_obj will be an instance of SecurityInfo from patterns.TOOL_RISKS
+        security_info_obj = TOOL_RISKS.get(pattern_name)
+
+        description_text = "N/A"
+        remediation_text = "N/A"
+        risk_description_text = "N/A" # Corresponds to security_info_obj.impact
+
+        if security_info_obj:
+            description_text = security_info_obj.description
+            remediation_text = security_info_obj.remediation
+            risk_description_text = security_info_obj.impact
+        elif pattern_name: # Fallback for custom/unknown patterns
+            description_text = f"Unknown/Custom: {pattern_name}"
+            remediation_text = "Review implementation and apply appropriate remediation."
+            risk_description_text = "Impact unknown due to custom/unknown pattern. Manual review required."
+        
+        # evidence_data comes from the 'context' field of the finding
+        evidence_data = finding.get("context")
+
+        # Format all data for cells using the helper
+        formatted_description = _format_cell_data(description_text)
+        formatted_remediation = _format_cell_data(remediation_text)
+        
+        # Generate enhanced risk description
+        enhanced_risk_description = generate_enhanced_risk_description(
+            risk_description_text,
+            pattern_name,
+            evidence_data,
+            security_info_obj
+        )
+        formatted_risk_description = _format_cell_data(enhanced_risk_description)
+        formatted_evidence = _format_cell_data(evidence_data)
+        
+        # Prepare other existing data for the row
+        file_path_str = finding.get("file_path", "N/A")
+        line_number_str = str(finding.get("line_number")) if finding.get("line_number") is not None else "N/A"
+        confidence_str = finding.get("risk_level", "N/A") # This is 'Confidence'
+
+        table.add_row(
+            file_path_str,
+            line_number_str,
+            formatted_description,
+            confidence_str,
+            formatted_remediation,
+            formatted_risk_description,
+            formatted_evidence
+        )
+    
+    console_instance.print(table)
+ 
+ 
+# --- Main Execution Logic ---
+def main(args=None): # Allow args to be passed for testing, default to None for CLI use
+    # console is defined globally
     parser = argparse.ArgumentParser(description="Scan agent configurations for security issues.")
     parser.add_argument(
         "target",
@@ -261,8 +404,32 @@ def main(args):
         help="Output results to a CSV file at the specified path",
         default=None
     )
-
-    args = parser.parse_args()
+    parser.add_argument(
+        "--export-json",
+        nargs='?',
+        const='scan_results.json',
+        default=None, # Important: default to None if flag not present
+        metavar='FILEPATH',
+        help="Export scan results to a JSON file. Defaults to 'scan_results.json' if no path is specified."
+    )
+    parser.add_argument(
+        "--json-stdout",
+        action="store_true",
+        help="Print scan results as JSON to standard output."
+    )
+    # The old --format argument is largely superseded by the new flags.
+    # Keeping it for now but its behavior will be overridden if new flags are used.
+    parser.add_argument(
+        "-f", "--format",
+        choices=['json', 'table'],
+        default='table', # Defaulting to table as per new requirements if no other flags specified
+        help="Output format (default: table, if not using --json-stdout or --export-json)."
+    )
+    # TDD Anchor: Add tests for argument parsing, including format.
+ 
+    if isinstance(args, argparse.Namespace):
+        args = list(vars(args).values())
+    args = parser.parse_args(args) # Pass args for testing
 
     try:
         all_reports = []
@@ -323,19 +490,52 @@ def main(args):
             final_json_output = processed_results_for_json[0]
 
         # --- Output Generation ---
-
-        # 1. Generate CSV if requested
+ 
+        # 1. Generate CSV if requested (independent of other formats)
         if args.output_csv:
             generate_csv_report(flat_findings_for_csv, args.output_csv)
-
-        # 2. Generate JSON output (to file or stdout)
-        output_json_str = json.dumps(final_json_output, indent=2)
-        # Write to file or print to stdout
-        if args.output:
-            with open(args.output, "w") as f:
-                f.write(output_json_str)
+            # CSV generation prints its own confirmation or error
+ 
+        # 2. Handle primary output: JSON stdout, JSON file, or Table stdout
+        if args.json_stdout:
+            # Print full scan results as JSON to sys.stdout
+            sys.stdout.write(json.dumps(final_json_output, indent=2) + '\n')
+        elif args.export_json:
+            # Get the target filepath (either provided or default)
+            filepath = args.export_json # This holds the value from const or user input
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(final_json_output, indent=2))
+                console.print(f"Results exported to [green]{filepath}[/green]")
+            except IOError as e:
+                console.print(f"[red]Error:[/red] Could not write JSON report to {filepath}. Reason: {e}")
         else:
-            print(output_json_str)
+            # Default behavior: Format and print results as a table to sys.stdout
+            # This also covers args.format == 'table' if no other JSON flags are set.
+            format_results_as_table(flat_findings_for_csv, console)
+            # The old args.output for table format to file is not explicitly supported by new reqs.
+            # The old args.format == 'json' without other flags would also fall here,
+            # printing table. This is a change from previous behavior if only --format=json was used.
+            # However, the new flags --json-stdout and --export-json are more specific.
+            if args.output and args.format == 'json' and not args.json_stdout and not args.export_json:
+                 # This case is a bit ambiguous now. The old --output with --format=json
+                 # would write JSON to a file. The new flags handle JSON export explicitly.
+                 # For now, if --output is given and --format=json, but no new JSON flags,
+                 # we can honor the old behavior for --output.
+                 try:
+                     with open(args.output, "w", encoding="utf-8") as f:
+                         f.write(json.dumps(final_json_output, indent=2))
+                     console.print(f"JSON report (via --output) successfully generated at: [green]{args.output}[/green]")
+                 except IOError as e:
+                     console.print(f"[red]Error:[/red] Could not write JSON report (via --output) to {args.output}. Reason: {e}")
+            elif args.output and args.format == 'table' and not args.json_stdout and not args.export_json:
+                # If user explicitly asked for table output to a file via old --output and --format=table
+                # we can try to support it, though rich table to file is less ideal than direct print.
+                # The format_output_table (tabulate) could be used here if preferred for file output.
+                # For simplicity, current table output is via rich to console.
+                # This path is less likely given the new flags.
+                console.print(f"[yellow]Warning:[/yellow] Outputting table to file via --output is not the primary supported method. Table is printed to console.")
+
 
     except Exception as e:
         print(f"Error: {e}")
@@ -345,4 +545,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-    exit(main())
+    # Pass sys.argv[1:] to main if running as script, otherwise use default None
+    import sys
+    exit(main(sys.argv[1:]))

@@ -44,6 +44,7 @@ class SecurityInfo:
     category: str = ""  # e.g., "Input Validation", "Access Control", etc.
     cwe: List[str] = None  # Common Weakness Enumeration IDs
     owasp: List[str] = None  # OWASP Top 10 categories
+    allowed_actions: Optional[List[str]] = None # New field for allowed actions
 
     def __post_init__(self):
         # Set severity emoji based on risk level
@@ -61,6 +62,8 @@ class SecurityInfo:
             self.cwe = []
         if self.owasp is None:
             self.owasp = []
+        if self.allowed_actions is None:
+            self.allowed_actions = []
 
 @dataclass
 class SecurityFinding:

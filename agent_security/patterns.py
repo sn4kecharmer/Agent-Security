@@ -191,6 +191,14 @@ TOOL_RISKS: Dict[str, SecurityInfo] = {
         pattern=re.compile(r"memory=|with_memory|memory_config")
     ),
 }
+# Descriptions for inferred actions
+ACTION_RISK_DESCRIPTIONS: Dict[str, str] = {
+    "execute_shell_command": "Potential for arbitrary command execution on the host system.",
+    "read_local_files": "Potential for unauthorized access to sensitive local files.",
+    "write_local_files": "Potential for unauthorized modification or creation of local files, including system files.",
+    "unrestricted_api_call": "Potential for Server-Side Request Forgery (SSRF) or interaction with malicious external services.",
+    # TODO Add more actions and their risk descriptions as identified
+}
 
 # YAML-specific tool patterns with security information
 YAML_TOOL_PATTERNS = {

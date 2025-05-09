@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Union, Set, Tuple
 from pathlib import Path
 from .git_scanner import GitScanner
 from .models import RiskLevel, SecurityInfo, SecurityFinding, SecurityReport
-from .file_scanner import scan_file
-from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
+from .file_scanner import scan_file # scan_file is also defined in this file, this might be a circular import or unused.
+from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS, ACTION_RISK_DESCRIPTIONS
 import ruamel.yaml
 from datetime import datetime
 from tabulate import tabulate
@@ -75,6 +75,57 @@ def is_finding_ignored(finding: SecurityFinding, ignored_set: Set[Tuple[str, int
         return False
 # --- End False Positive Handling ---
 
+# --- Risk Description Enhancement Helpers ---
+
+def GET_allowed_actions(
+    pattern_details: Optional[SecurityInfo],
+    content_context: Optional[str],
+    pattern_name: Optional[str]
+) -> List[str]:
+    """
+    Infers allowed actions based on pattern details or content context.
+    """
+    actions: List[str] = []
+    if pattern_details and pattern_details.allowed_actions:
+        actions.extend(pattern_details.allowed_actions)
+
+    # If actions are still empty or more inference is needed,
+    # use content_context and pattern_name.
+    if content_context:
+        # Basic inference examples (can be expanded significantly)
+        if "os.system(" in content_context or \
+           "subprocess.call(" in content_context or \
+           "subprocess.run(" in content_context:
+            if "execute_shell_command" not in actions:
+                actions.append("execute_shell_command")
+        
+        if "open(" in content_context:
+            # Simplistic check for file read/write, can be made more robust
+            if ".write(" in content_context or "mode='w'" in content_context or "mode='a'" in content_context:
+                 if "write_local_files" not in actions:
+                    actions.append("write_local_files")
+            elif ".read(" in content_context or "mode='r'" in content_context or (not "mode=" in content_context and not ".write" in content_context and not ".append" in content_context): # Default to read if no mode or write/append
+                 if "read_local_files" not in actions:
+                    actions.append("read_local_files")
+
+        if "requests.get(" in content_context or \
+           "requests.post(" in content_context or \
+           "urllib.request.urlopen(" in content_context:
+            if "unrestricted_api_call" not in actions:
+                actions.append("unrestricted_api_call")
+        
+        # TODO: Add more sophisticated inference logic based on regex match groups from patterns,
+        # or specific keywords related to pattern_name if it's a custom tool.
+
+    return list(set(actions)) # Return unique actions
+
+def GET_contextual_risk_for_action(action_name: str) -> Optional[str]:
+    """
+    Retrieves a predefined risk description for a given action.
+    """
+    return ACTION_RISK_DESCRIPTIONS.get(action_name)
+
+# --- End Risk Description Enhancement Helpers ---
 
 def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_path: Path) -> SecurityReport:
     """
@@ -161,9 +212,24 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                 func_name = ""
                 if hasattr(node.func, 'id'): # Direct function call like Tool()
                     func_name = node.func.id
-                elif isinstance(node.func, ast.Attribute) and hasattr(node.func.value, 'id'): # Method call like crewai.Agent()
-                     # We might want to check node.func.attr as well if needed
-                     pass # Keep func_name empty for now or refine if needed
+                elif isinstance(node.func, ast.Attribute): # Method call like crew.kickoff()
+                    # Check for CrewAI autonomous execution methods
+                    if node.func.attr in ['kickoff', 'process', 'run']:
+                        pattern_key = 'crewai_autonomous'
+                        if pattern_key in TOOL_RISKS and (pattern_key, node.lineno) not in processed_patterns:
+                            context = ast.get_source_segment(source, node)
+                            finding = SecurityFinding(
+                                pattern=pattern_key,
+                                risk_level=TOOL_RISKS[pattern_key].risk_level,
+                                line_number=node.lineno,
+                                context=context,
+                                security_info=TOOL_RISKS[pattern_key],
+                                file_path=file_path
+                            )
+                            if not is_finding_ignored(finding, ignored_findings, base_path):
+                                report.findings.append(finding)
+                            processed_patterns.add((pattern_key, node.lineno))
+                    # Keep func_name empty for general method calls unless specifically handled
 
                 # General Tool Risk Check
                 if func_name and func_name in TOOL_RISKS:
@@ -182,7 +248,7 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                         processed_patterns.add((func_name, node.lineno))
 
                 # CrewAI Agent/Task Check
-                if func_name in ['Agent', 'Task']:
+                if func_name in ['Agent', 'Task', 'Crew']:
                     pattern_key = f"crewai_{func_name.lower()}" # crewai_agent or crewai_task
                     if pattern_key in TOOL_RISKS and (pattern_key, node.lineno) not in processed_patterns:
                         context = ast.get_source_segment(source, node)

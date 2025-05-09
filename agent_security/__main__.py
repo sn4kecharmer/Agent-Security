@@ -31,7 +31,7 @@ def entry_point():
         default=None
     )
     args = parser.parse_args()
-    sys.exit(main(args))
+    sys.exit(main())
 
 if __name__ == "__main__":
     entry_point()

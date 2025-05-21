@@ -2,9 +2,21 @@
 
 A command-line tool designed to scan LLM agent configurations and code (supporting LangChain, AutoGen, YAML, and Python files) to identify potential security risks and vulnerabilities. It analyzes tool usage, permissions, configurations, and code patterns to generate a comprehensive security report.
 
-## License Notice
+## License
 
-This software is proprietary and requires explicit written permission for any use, modification, or distribution. Please contact the copyright holders for licensing information.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Usage and Contribution Terms:
+- You are free to use, modify, and distribute this software
+- You must include the original copyright notice and license
+- Contributions are welcome and will be licensed under the same terms
+- No warranty is provided; use at your own risk
+- If you create derivative works, please:
+  - Clearly indicate changes from the original
+  - Do not use our name to endorse your modifications
+  - Maintain the spirit of security and responsible disclosure
+
+For commercial support or custom licensing options, please contact the maintainers.
 
 ## Key Features
 

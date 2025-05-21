@@ -103,13 +103,48 @@ def scan(
     branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Git branch to scan"),
     explain: bool = typer.Option(False, "--explain", help="Show detailed explanations"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file for results"),
-    output_csv: Optional[str] = typer.Option(None, "--output-csv", help="Output CSV file for results")
+    output_csv: Optional[str] = typer.Option(None, "--output-csv", help="Output CSV file for results"),
+    output_html: Optional[str] = typer.Option(None, "--output-html", help="Output HTML file for results")
 ):
     """
     Scan agent configurations for security issues.
     """
     try:
-        scan_target(target, branch, explain)
+        # Perform the scan
+        report = scan_target(target, branch, explain)
+        
+        # Convert findings to list format
+        findings_list = []
+        if report and hasattr(report, 'findings'):
+            findings_list = [
+                {
+                    "file_path": finding.file_path,
+                    "line_number": finding.line_number,
+                    "pattern": finding.pattern,
+                    "risk_level": finding.risk_level.name if hasattr(finding.risk_level, 'name') else str(finding.risk_level),
+                    "context": finding.context,
+                    "security_info": finding.security_info.__dict__ if finding.security_info else {}
+                }
+                for finding in report.findings
+            ]
+        
+        # Handle HTML output if requested
+        if output_html:
+            generate_html_report(findings_list, output_html)
+        
+        # Handle CSV output if requested
+        if output_csv:
+            generate_csv_report(findings_list, output_csv)
+        
+        # Handle JSON output if requested
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(report.to_dict() if report else {}, f, indent=2)
+            console.print(f"Results exported to [green]{output}[/green]")
+        
+        # Display the report in the console
+        display_report(report, explain)
+        
     except Exception as e:
         logging.error(f"Error: {e}")
         if "--verbose" in sys.argv:
@@ -288,11 +323,9 @@ def format_results_as_table(findings_list: List[Dict[str, Any]], console_instanc
                 description_text = "N/A"
 
         # Get evidence from finding or security_info and clean it up
-        evidence_text = finding.get("evidence", "")
+        evidence_text = finding.get("context", "")
         if not evidence_text:
             evidence_text = security_info.get("evidence", "")
-        if not evidence_text:
-            evidence_text = finding.get("context", "")
         if not evidence_text:
             evidence_text = "N/A"
         
@@ -407,11 +440,10 @@ def scan_target(target_path: str, branch: Optional[str] = None, explain: bool = 
     if is_git_url(target_path):
         try:
             report = scan_git_repository(target_path, branch)
-            display_report(report, explain)
+            return report
         except ImportError:
             console.print("[red]Error: Git support is not available. Please install git to scan repositories.[/red]")
             sys.exit(1)
-        return
 
     # Handle local files/directories
     path = Path(target_path)
@@ -471,7 +503,7 @@ def scan_target(target_path: str, branch: Optional[str] = None, explain: bool = 
     ignored_findings = load_ignored_findings(base_path)
 
     report = scan_file(str(scan_path), ignored_findings, base_path)
-    display_report(report, explain)
+    return report
 
 @app.callback()
 def callback():
@@ -479,6 +511,129 @@ def callback():
     Agent Security Scanner - Scan agent configurations for security issues.
     """
     pass
+
+def generate_html_report(findings_list: List[Dict[str, Any]], output_filepath: str):
+    """Generates an HTML report from a list of finding dictionaries."""
+    try:
+        # HTML template with inline styles
+        html_template = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Security Scan Report</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; background: #f5f5f5;">
+    <div style="max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <h1 style="color: #2c3e50; margin-bottom: 20px;">Agent Security Scan Report</h1>
+        <div style="margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
+            <h2>Summary</h2>
+            <p>Generated: {timestamp}</p>
+            <p>Total Findings: {total_findings}</p>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <thead>
+                <tr>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">File</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Line</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Pattern</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Risk Level</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Description</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Evidence</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background-color: #f8f9fa; font-weight: bold;">Remediation</th>
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>'''
+
+        if not findings_list:
+            table_rows = '<tr><td colspan="7" style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">No findings detected.</td></tr>'
+        else:
+            rows = []
+            for finding in findings_list:
+                security_info = finding.get("security_info", {}) or {}
+                risk_level = finding.get("risk_level", "")
+                risk_color = {
+                    "CRITICAL": "#dc3545",
+                    "HIGH": "#fd7e14",
+                    "MEDIUM": "#ffc107",
+                    "LOW": "#28a745"
+                }.get(risk_level, "#000000")
+                
+                evidence = finding.get("context", "")
+                if not evidence:
+                    evidence = security_info.get("evidence", "N/A")
+                
+                # Escape HTML special characters
+                file_path = finding.get("file_path", "N/A").replace("<", "&lt;").replace(">", "&gt;")
+                pattern = finding.get("pattern", "N/A").replace("<", "&lt;").replace(">", "&gt;")
+                description = security_info.get("description", "N/A").replace("<", "&lt;").replace(">", "&gt;")
+                evidence = evidence.replace("<", "&lt;").replace(">", "&gt;")
+                remediation = security_info.get("remediation", "N/A").replace("<", "&lt;").replace(">", "&gt;")
+                
+                row = f'''<tr style="background-color: #ffffff;">
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">{file_path}</td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">{finding.get("line_number", "N/A")}</td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">{pattern}</td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; color: {risk_color}; font-weight: bold;">{risk_level}</td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">{description}</td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;"><div style="font-family: monospace; background: #f8f9fa; padding: 8px; border-radius: 4px; white-space: pre-wrap;">{evidence}</div></td>
+                    <td style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">{remediation}</td>
+                </tr>'''
+                rows.append(row)
+            table_rows = "\n".join(rows)
+
+        # Generate the final HTML with the current timestamp
+        html_content = html_template.format(
+            timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            total_findings=len(findings_list),
+            table_rows=table_rows
+        )
+
+        with open(output_filepath, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        
+        print(f"HTML report successfully generated at: {output_filepath}")
+    except IOError as e:
+        print(f"Error: Could not write HTML file to {output_filepath}. Reason: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during HTML generation: {e}")
+
+# Update the main function to handle HTML output
+@app.command()
+def main(
+    target: str = typer.Argument(..., help="File or directory to scan"),
+    branch: str = typer.Option(None, help="Branch to scan (for Git repositories)"),
+    output: Optional[str] = typer.Option(None, help="Output JSON report to file"),
+    output_csv: Optional[str] = typer.Option(None, help="Output findings in CSV format"),
+    output_html: Optional[str] = typer.Option(None, help="Output findings in HTML format"),
+    json_stdout: bool = typer.Option(False, help="Output JSON to stdout"),
+    explain: bool = typer.Option(False, help="Include detailed explanations"),
+    format: str = typer.Option("table", help="Output format (json or table)")
+):
+    """
+    Scan agent configurations for security issues.
+    """
+    try:
+        scan_target(target, branch, explain)
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        if "--verbose" in sys.argv:
+            logging.exception("Detailed error:")
+        sys.exit(1)
+
+    # Handle CSV output if requested
+    if output_csv:
+        generate_csv_report(findings_list, output_csv)
+
+    # Handle HTML output if requested
+    if output_html:
+        generate_html_report(findings_list, output_html)
 
 if __name__ == "__main__":
     app()

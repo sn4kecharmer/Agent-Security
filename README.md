@@ -19,8 +19,11 @@ This software is proprietary and requires explicit written permission for any us
 -   **False Positive Management:** Allows ignoring specific findings via a `.agent_security_ignore` file.
 -   **Enhanced Security:** Implements safe YAML loading, path validation, and improved pattern detection.
 -   **Docker Support:** Run the scanner in an isolated environment with all dependencies properly installed.
+-   **HTML Reports:** Generate a detailed HTML report with color-coded findings.
 
 ## Installation
+
+### Option 1: Direct Installation
 
 ```bash
 # Clone the repository (if you haven't already)
@@ -33,6 +36,38 @@ pip install -r requirements.txt
 # Optional: Install the package locally for easier CLI access
 # pip install .
 ```
+
+### Option 2: Using Virtual Environment (Recommended)
+
+```bash
+# Clone the repository (if you haven't already)
+# git clone <repository-url>
+# cd agent-security-scanner
+
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+## On macOS/Linux:
+source venv/bin/activate
+## On Windows:
+# .\venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Optional: Install the package locally for easier CLI access
+# pip install .
+
+# When you're done, you can deactivate the virtual environment
+# deactivate
+```
+
+Using a virtual environment is recommended as it:
+- Isolates the project dependencies from your system Python packages
+- Prevents conflicts between different project requirements
+- Makes it easier to manage and track dependencies
+- Ensures a clean, reproducible environment for the scanner
 
 ## Usage
 
@@ -92,9 +127,32 @@ docker run -v "$(pwd)":/scan agent-security /scan/examples/vulnerable_yaml_openA
 -   `--branch <branch_name>`: Specify a branch when scanning a Git repository.
 -   `--output <output.json>`: Output the report in JSON format.
 -   `--output-csv <report.csv>`: Output the findings in CSV format.
+-   `--output-html <report.html>`: Generate a detailed HTML report with color-coded findings.
 -   `--explain`: Include detailed explanations of risk levels.
 -   `--json-stdout`: Output the report in JSON format to stdout.
 -   `-f, --format {json,table}`: Specify the output format.
+
+## HTML Reports
+
+The HTML report feature (`--output-html`) generates a comprehensive, well-formatted security report that includes:
+
+-   Summary statistics with total findings count
+-   Color-coded risk levels (Critical: Red, High: Orange, Medium: Yellow, Low: Green)
+-   Detailed findings table with:
+    -   File paths and line numbers
+    -   Pattern names and descriptions
+    -   Risk levels
+    -   Code evidence in monospace font
+    -   Remediation recommendations
+
+Example usage:
+```bash
+# Generate an HTML report
+python -m agent_security scan ./examples/langchain_agent.py --output-html security_report.html
+
+# Generate multiple report formats
+python -m agent_security scan ./examples/langchain_agent.py --output report.json --output-csv findings.csv --output-html report.html
+```
 
 ## What It Scans For
 

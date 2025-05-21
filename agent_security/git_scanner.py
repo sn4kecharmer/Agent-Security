@@ -1,17 +1,15 @@
 """
-Git repository scanner for agent configurations.
+Git repository scanning functionality.
 """
 
 import os
 import tempfile
-import shutil
-from typing import List, Optional
+import logging
 from pathlib import Path
-import git
+from typing import List, Optional
 from .models import SecurityReport
 from .file_scanner import scan_file
 import re
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -25,42 +23,66 @@ def sanitize_git_error(error: Exception) -> str:
     return error_str
 
 class GitScanner:
-    """Scans agent configurations in a Git repository."""
+    """Scanner for Git repositories."""
     
     def __init__(self, repo_url: str, branch: Optional[str] = None):
-        """
-        Initialize the Git scanner.
-        
-        Args:
-            repo_url: URL of the Git repository
-            branch: Optional branch name to scan (defaults to main/master)
-        """
         self.repo_url = repo_url
         self.branch = branch
-        self.temp_dir = None
-        self.repo = None
+        self._temp_dir = None
+        self._repo = None
 
     def __enter__(self):
-        """Set up the temporary directory and clone the repository."""
-        self.temp_dir = tempfile.mkdtemp(prefix='agent_security_')
-        try:
-            self.repo = git.Repo.clone_from(
-                self.repo_url,
-                self.temp_dir,
-                branch=self.branch if self.branch else None,
-                depth=1
-            )
-        except git.exc.GitCommandError as e:
-            raise ValueError(f"Failed to clone repository: {sanitize_git_error(e)}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Clean up the temporary directory."""
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            try:
-                shutil.rmtree(self.temp_dir)
-            except Exception as e:
-                logger.error(f"Failed to clean up temporary directory: {sanitize_git_error(e)}")
+        self.cleanup()
+
+    def cleanup(self):
+        """Clean up temporary files."""
+        if self._temp_dir and os.path.exists(self._temp_dir):
+            import shutil
+            shutil.rmtree(self._temp_dir)
+
+    def clone_repository(self):
+        """Clone the repository to a temporary directory."""
+        try:
+            import git
+        except ImportError:
+            raise ValueError("Git support is not available. Please install git to use this feature.")
+
+        self._temp_dir = tempfile.mkdtemp()
+        try:
+            self._repo = git.Repo.clone_from(self.repo_url, self._temp_dir)
+            if self.branch:
+                self._repo.git.checkout(self.branch)
+        except Exception as e:
+            self.cleanup()
+            raise ValueError(f"Failed to clone repository: {e}")
+
+    def scan(self) -> SecurityReport:
+        """
+        Scan the repository for security issues.
+        
+        Returns:
+            SecurityReport containing findings
+        """
+        try:
+            self.clone_repository()
+            # Scan all Python and YAML files in the repository
+            report = SecurityReport()
+            for ext in ['*.py', '*.yaml', '*.yml']:
+                for file_path in Path(self._temp_dir).rglob(ext):
+                    if '.git' in file_path.parts:
+                        continue
+                    try:
+                        file_report = scan_file(str(file_path))
+                        if file_report and file_report.findings:
+                            report.merge(file_report)
+                    except Exception as e:
+                        logger.error(f"Error scanning file {file_path}: {e}")
+            return report
+        finally:
+            self.cleanup()
 
     def find_config_files(self) -> List[Path]:
         """
@@ -84,7 +106,7 @@ class GitScanner:
         ]
         
         for pattern in config_patterns:
-            config_files.extend(Path(self.temp_dir).rglob(pattern))
+            config_files.extend(Path(self._temp_dir).rglob(pattern))
         
         return config_files
 
@@ -95,7 +117,7 @@ class GitScanner:
         Returns:
             List of security reports for each configuration file
         """
-        if not self.repo:
+        if not self._repo:
             raise ValueError("Repository not initialized. Use with context manager.")
         
         reports = []
@@ -129,7 +151,7 @@ class GitScanner:
             "common_issues": {},
             "repository_url": self.repo_url,
             "branch": self.branch or "default",
-            "commit_hash": self.repo.head.commit.hexsha if self.repo else None
+            "commit_hash": self._repo.head.commit.hexsha if self._repo else None
         }
         
         # Count files by risk level

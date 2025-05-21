@@ -44,6 +44,12 @@ app = typer.Typer(
 )
 console = Console()
 
+# Try to import git support, but make it optional
+try:
+    from .scanner import scan_git_repository
+    HAS_GIT_SUPPORT = True
+except ImportError:
+    HAS_GIT_SUPPORT = False
 
 def format_risk_level(risk: str) -> str:
     """Format risk level for display."""
@@ -93,96 +99,22 @@ def print_risk_explanation(risk: str):
 
 @app.command()
 def scan(
-    file_path: Path = typer.Argument(..., help="Path to the configuration file to scan"),
-    output_json: bool = typer.Option(False, "--json", help="Output results in JSON format"),
-    explain: bool = typer.Option(False, "--explain", help="Show detailed explanation of risk levels"),
-    fail_on_high: bool = typer.Option(False, "--fail-on-high", help="Exit with error code if high risk is detected"),
+    target: str = typer.Argument(..., help="File, directory, or Git URL to scan"),
+    branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Git branch to scan"),
+    explain: bool = typer.Option(False, "--explain", help="Show detailed explanations"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file for results"),
+    output_csv: Optional[str] = typer.Option(None, "--output-csv", help="Output CSV file for results")
 ):
     """
-    Scan a configuration file for LLM agent tool usage and security risks.
+    Scan agent configurations for security issues.
     """
     try:
-        # Determine base path and load ignored findings for the typer command
-        target_path = Path(file_path)
-        if target_path.is_dir():
-             # TODO: Handle directory scanning in typer command if needed
-             console.print("[yellow]Warning:[/yellow] Directory scanning via the 'scan' command is not fully implemented for ignore files yet.")
-             base_path = target_path
-        elif target_path.is_file():
-            base_path = target_path.parent
-        else:
-             console.print(f"[red]Error:[/red] Invalid file path: {file_path}")
-             raise typer.Exit(1)
-
-        ignored_set = load_ignored_findings(base_path)
-        report = scan_file(str(file_path), ignored_set, base_path) # Pass ignored_set and base_path
-
-        if output_json:
-            console.print(json.dumps(report.to_dict(), indent=2))
-            if fail_on_high and report.overall_risk == "HIGH":
-                raise typer.Exit(1)
-            return
-
-        # Create a rich table for the report
-        table = Table(
-            title="Agent Security Report",
-            show_lines=True,
-            padding=(0, 1),
-            expand=True
-        )
-        table.add_column("Title", style="cyan", no_wrap=False)
-        table.add_column("Description", style="italic", no_wrap=False)
-        table.add_column("Impact", style="red", no_wrap=False)
-        table.add_column("Pattern", style="dim", no_wrap=False)
-        table.add_column("Risk", width=8)
-        table.add_column("Line", justify="right", width=5)
-        table.add_column("Remediation", style="green", no_wrap=False)
-
-        # Sort findings by risk level in decreasing order of severity
-        sorted_findings = sorted(
-            report.findings,
-            key=lambda x: (
-                {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}.get(x.risk_level.name, 0)
-            ),
-            reverse=True
-        )
-
-        for finding in sorted_findings:
-            # Get security info for the pattern
-            security_info = TOOL_RISKS.get(finding.pattern, None)
-            if security_info:
-                title = finding.pattern
-                description = security_info.description
-                impact = security_info.impact
-                remediation = security_info.remediation
-            else:
-                title = finding.pattern
-                description = "Custom or unknown pattern"
-                impact = "Unknown impact - review implementation"
-                remediation = "Review implementation and restrict access if needed"
-
-            table.add_row(
-                title,
-                description,
-                impact,
-                finding.pattern,
-                format_risk_level(finding.risk_level.name),
-                str(finding.line_number) if finding.line_number else "N/A",
-                remediation
-            )
-
-        console.print(table)
-        console.print(f"\nOverall Risk Level: {format_risk_level(report.overall_risk.name)}")
-
-        if explain:
-            print_risk_explanation(report.overall_risk.name)
-
-        if fail_on_high and report.overall_risk == "HIGH":
-            raise typer.Exit(1)
-
+        scan_target(target, branch, explain)
     except Exception as e:
-        console.print(f"[red]Error:[/red] {str(e)}")
-        raise typer.Exit(1)
+        logging.error(f"Error: {e}")
+        if "--verbose" in sys.argv:
+            logging.exception("Detailed error:")
+        sys.exit(1)
 
 
 @app.command()
@@ -426,178 +358,127 @@ def handle_error(error: Exception, verbose: bool = False) -> None:
     
     sys.exit(1)
 
-def main(args=None): # Allow args to be passed for testing, default to None for CLI use
-    # console is defined globally
-    parser = argparse.ArgumentParser(description="Scan agent configurations for security issues.")
-    parser.add_argument(
-        "target",
-        help="File path or Git repository URL to scan"
+def is_git_url(target: str) -> bool:
+    """Check if target is a Git URL."""
+    if isinstance(target, str):
+        return target.startswith(("http://", "https://", "git://", "ssh://"))
+    return False
+
+def display_report(report, explain: bool = False):
+    """Display the scan report."""
+    if not report or not report.findings:
+        console.print("No vulnerabilities found.")
+        return
+
+    table = Table(
+        title="Scan Results",
+        show_lines=True,  # Show horizontal lines between rows
+        show_edge=True,   # Show outer edges
+        padding=(0, 1)    # Add some padding for better readability
     )
-    parser.add_argument(
-        "--branch",
-        help="Git branch to scan (only used with repository URLs)",
-        default=None
-    )
-    parser.add_argument(
-        "--explain",
-        action="store_true",
-        help="Include detailed explanations in the output"
-    )
-    parser.add_argument(
-        "--output",
-        help="Output file path (default: print to stdout)",
-        default=None
-    )
-    parser.add_argument(
-        "--output-csv",
-        help="Output results to a CSV file at the specified path",
-        default=None
-    )
-    parser.add_argument(
-        "--export-json",
-        nargs='?',
-        const='scan_results.json', # Default filename if no arg provided
-        default=None,
-        metavar='FILEPATH',
-        help="Export scan results to a JSON file. Defaults to 'scan_results.json' if no path is specified."
-    )
-    parser.add_argument(
-        "--json-stdout",
-        action="store_true",
-        help="Print scan results as JSON to standard output."
-    )
-    # The old --format argument is largely superseded by the new flags.
-    # Keeping it for now but its behavior will be overridden if new flags are used.
-    parser.add_argument(
-        "-f", "--format",
-        choices=['json', 'table'],
-        default='table', # Defaulting to table as per new requirements if no other flags specified
-        help="Output format (default: table, if not using --json-stdout or --export-json)."
-    )
-    # TDD Anchor: Add tests for argument parsing, including format.
- 
-    if isinstance(args, argparse.Namespace):
-        args = list(vars(args).values())
-    args = parser.parse_args(args) # Pass args for testing
+    table.add_column("File")
+    table.add_column("Line")
+    table.add_column("Description")
+    table.add_column("Evidence")
+    table.add_column("Remediation")
+    table.add_column("Risk Level")
 
-    try:
-        all_reports = []
-        # Check if target is a Git repository URL
-        if args.target.startswith(("http://", "https://", "git://")):
-            # TODO: Update scan_git_repository and GitScanner to handle ignore files
-            console.print("[yellow]Warning:[/yellow] Git repository scanning currently does not support .agent_security_ignore files.")
-            all_reports = scan_git_repository(args.target, args.branch)
-        else:
-            # Treat as local path (file or directory)
-            target_path = Path(args.target)
-            if target_path.is_file():
-                base_path = target_path.parent
-                ignored_set = load_ignored_findings(base_path)
-                report = scan_file(str(target_path), ignored_set, base_path)
-                if report:
-                    all_reports.append(report)
-            elif target_path.is_dir():
-                base_path = target_path
-                ignored_set = load_ignored_findings(base_path)
-                console.print(f"Scanning directory: {target_path}")
-                # Scan all Python and YAML files in the directory
-                found_files = False
-                for ext in ['*.py', '*.yaml', '*.yml']:
-                    # Use rglob for recursive search
-                    for file_p in target_path.rglob(ext):
-                         # Skip files within .git directories or other common ignores if needed
-                         if ".git" in file_p.parts:
-                              continue
-                         found_files = True
-                         print(f"Scanning file: {file_p}")
-                         try:
-                              file_report = scan_file(str(file_p), ignored_set, base_path)
-                              if file_report and file_report.findings: # Only add reports with findings
-                                   all_reports.append(file_report)
-                         except FileNotFoundError:
-                              console.print(f"[yellow]Warning:[/yellow] Skipping file not found during directory scan: {file_p}")
-                         except Exception as e:
-                              console.print(f"[red]Error scanning file {file_p}:[/red] {e}")
-                
-                if not found_files:
-                    console.print("No vulnerabilities found.")
-                elif not all_reports:
-                    console.print("No vulnerabilities found in scanned files.")
-            else:
-                 console.print(f"[red]Error:[/red] Target path '{args.target}' is not a valid file, directory, or Git URL.")
-                 raise typer.Exit(1)
+    for finding in report.findings:
+        # Get description and remediation from security_info
+        description = finding.security_info.description if finding.security_info else "N/A"
+        remediation = finding.security_info.remediation if finding.security_info else "N/A"
+        
+        # Use context as evidence
+        evidence = finding.context if finding.context else "N/A"
+        
+        table.add_row(
+            str(finding.file_path),
+            str(finding.line_number),
+            description,
+            evidence,
+            remediation,
+            finding.risk_level.name
+        )
 
+    console.print(table)
 
-        # Prepare results for JSON output and CSV export
-        processed_results_for_json = []
-        flat_findings_for_csv = []
+def scan_target(target_path: str, branch: Optional[str] = None, explain: bool = False):
+    """Scan a target path or Git URL."""
+    if is_git_url(target_path):
+        try:
+            report = scan_git_repository(target_path, branch)
+            display_report(report, explain)
+        except ImportError:
+            console.print("[red]Error: Git support is not available. Please install git to scan repositories.[/red]")
+            sys.exit(1)
+        return
 
-        for report in all_reports:
-            report_dict = report.to_dict()
-            processed_results_for_json.append(report_dict)
-            # Add file_path to each finding for the flat CSV list
-            for finding_dict in report_dict.get('findings', []):
-                finding_dict['file_path'] = report_dict.get('file_path', 'N/A')
-                flat_findings_for_csv.append(finding_dict)
+    # Handle local files/directories
+    path = Path(target_path)
+    logger.info(f"Initial path: {path}")
+    
+    # Determine if we're running in Docker by checking for /scan directory
+    in_docker = Path('/scan').exists()
+    
+    # Set base path and handle path resolution based on environment
+    if in_docker:
+        base_path = Path('/scan')
+        # Handle various path formats in Docker
+        if str(path).startswith('/scan/'):
+            # Strip /scan/ prefix if present
+            path = Path(str(path).replace('/scan/', '', 1))
+        elif str(path).startswith('./examples/') or str(path).startswith('examples/'):
+            # Strip ./ prefix if present
+            path = Path(str(path).replace('./', '', 1))
+        full_path = base_path / path
+    else:
+        # Outside Docker, use absolute paths
+        path = path.resolve()
+        base_path = path.parent if path.is_file() else path
+        full_path = path
+    
+    logger.info(f"Running in Docker: {in_docker}")
+    logger.info(f"Base path: {base_path}, Relative path: {path}")
+    logger.info(f"Checking paths - Direct: {path} (exists: {path.exists()}), Full: {full_path} (exists: {full_path.exists()})")
+    
+    if not path.exists() and not full_path.exists():
+        console.print(f"[red]Error: Target path '{target_path}' is not a valid file, directory, or Git URL.[/red]")
+        # Print debug info about the file system
+        try:
+            if os.environ.get('AGENT_SECURITY_DEBUG'):
+                if base_path.exists():
+                    logger.info(f"Base directory {base_path} exists")
+                    # List contents recursively
+                    def list_dir(dir_path: Path, depth=0):
+                        if depth > 3:  # Limit recursion depth
+                            return
+                        for item in dir_path.iterdir():
+                            logger.info(f"{'  ' * depth}Found: {item}")
+                            if item.is_dir() and not item.name.startswith('.'):
+                                list_dir(item, depth + 1)
+                    list_dir(base_path)
+                else:
+                    logger.info(f"Base directory {base_path} does not exist")
+        except Exception as e:
+            logger.error(f"Error during debug: {e}")
+        sys.exit(1)
 
-        # Handle single file scan case for JSON output consistency
-        final_json_output = processed_results_for_json
-        if not args.target.startswith(("http://", "https://", "git://")) and len(processed_results_for_json) == 1:
-            final_json_output = processed_results_for_json[0]
+    # Use the full path if it exists, otherwise use the direct path
+    scan_path = full_path if full_path.exists() else path
+    logger.info(f"Using path for scan: {scan_path}")
 
-        # --- Output Generation ---
- 
-        # 1. Generate CSV if requested (independent of other formats)
-        if args.output_csv:
-            generate_csv_report(flat_findings_for_csv, args.output_csv)
-            # CSV generation prints its own confirmation or error
- 
-        # 2. Handle primary output: JSON stdout, JSON file, or Table stdout
-        if args.json_stdout:
-            # Print full scan results as JSON to sys.stdout
-            sys.stdout.write(json.dumps(final_json_output, indent=2) + '\n')
-        elif args.export_json:
-            # Get the target filepath (either provided or default)
-            filepath = args.export_json # This holds the value from const or user input
-            try:
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(final_json_output, indent=2))
-                console.print(f"Results exported to [green]{filepath}[/green]")
-            except IOError as e:
-                console.print(f"[red]Error:[/red] Could not write JSON report to {filepath}. Reason: {e}")
-        else:
-            # Default behavior: Format and print results as a table to sys.stdout
-            # This also covers args.format == 'table' if no other JSON flags are set.
-            format_results_as_table(flat_findings_for_csv, console)
-            # The old args.output for table format to file is not explicitly supported by new reqs.
-            # The old args.format == 'json' without other flags would also fall here,
-            # printing table. This is a change from previous behavior if only --format=json was used.
-            # However, the new flags --json-stdout and --export-json are more specific.
-            if args.output and args.format == 'json' and not args.json_stdout and not args.export_json:
-                 # This case is a bit ambiguous now. The old --output with --format=json
-                 # would write JSON to a file. The new flags handle JSON export explicitly.
-                 # For now, if --output is given and --format=json, but no new JSON flags,
-                 # we can honor the old behavior for --output.
-                 try:
-                     with open(args.output, "w", encoding="utf-8") as f:
-                         f.write(json.dumps(final_json_output, indent=2))
-                     console.print(f"JSON report (via --output) successfully generated at: [green]{args.output}[/green]")
-                 except IOError as e:
-                     console.print(f"[red]Error:[/red] Could not write JSON report (via --output) to {args.output}. Reason: {e}")
-            elif args.output and args.format == 'table' and not args.json_stdout and not args.export_json:
-                # If user explicitly asked for table output to a file via old --output and --format=table
-                # we can try to support it, though rich table to file is less ideal than direct print.
-                # The format_output_table (tabulate) could be used here if preferred for file output.
-                # For simplicity, current table output is via rich to console.
-                # This path is less likely given the new flags.
-                console.print(f"[yellow]Warning:[/yellow] Outputting table to file via --output is not the primary supported method. Table is printed to console.")
+    # Load ignored findings from the base path
+    ignored_findings = load_ignored_findings(base_path)
 
+    report = scan_file(str(scan_path), ignored_findings, base_path)
+    display_report(report, explain)
 
-    except Exception as e:
-        handle_error(e, args.explain)
-
+@app.callback()
+def callback():
+    """
+    Agent Security Scanner - Scan agent configurations for security issues.
+    """
+    pass
 
 if __name__ == "__main__":
-    # Pass sys.argv[1:] to main if running as script, otherwise use default None
-    import sys
-    exit(main(sys.argv[1:]))
+    app()

@@ -30,7 +30,6 @@ htmlcov/
 out.*
 output.*
 
-# Exclude examples to avoid including them in build context
-# But keep the directory structure
-examples/*
-!examples/.gitkeep 
+# Keep examples directory for Docker build
+!examples/
+!examples/* 

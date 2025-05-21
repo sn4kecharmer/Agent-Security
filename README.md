@@ -18,6 +18,7 @@ This software is proprietary and requires explicit written permission for any us
 -   **Flexible Output:** Provides reports in console format, JSON (`--output`), and CSV (`--output-csv`).
 -   **False Positive Management:** Allows ignoring specific findings via a `.agent_security_ignore` file.
 -   **Enhanced Security:** Implements safe YAML loading, path validation, and improved pattern detection.
+-   **Docker Support:** Run the scanner in an isolated environment with all dependencies properly installed.
 
 ## Installation
 
@@ -35,12 +36,57 @@ pip install -r requirements.txt
 
 ## Usage
 
+There are three ways to run the scanner:
+
+### 1. Direct Python Usage
+
+Run the scanner directly using Python:
+
 ```bash
-python -m agent_security.cli <target> [options]
+# Basic usage
+python -m agent_security scan <target>
+
+# Example: Scan a YAML file
+python -m agent_security scan ./examples/vulnerable_yaml_openAgent.yaml
+
+# Example: Scan with options
+python -m agent_security scan ./examples/langchain_agent.py --explain
 ```
 
-**Arguments:**
--   `<target>`: (Required) The file path or Git repository URL to scan.
+### 2. Docker with Built-in Examples
+
+Run the scanner using Docker with the built-in example files:
+
+```bash
+# Build the Docker image
+docker build -t agent-security .
+
+# Scan a built-in example
+docker run agent-security examples/vulnerable_yaml_openAgent.yaml
+
+# Scan a built-in example with options
+docker run agent-security examples/va.yaml --explain
+```
+
+### 3. Docker with Local Files
+
+Run the scanner using Docker with your local files:
+
+```bash
+# Mount your current directory and scan a file
+docker run -v "$(pwd)":/scan agent-security /scan/path/to/your/file.yaml
+
+# Mount a specific directory and scan it
+docker run -v "/path/to/your/code":/scan agent-security /scan
+
+# Example with a specific file and options
+docker run -v "$(pwd)":/scan agent-security /scan/examples/vulnerable_yaml_openAgent.yaml --output report.json
+```
+
+**Note:** When using Docker with local files:
+- The directory containing your files must be mounted to `/scan` in the container
+- All paths in your commands should be relative to the `/scan` directory
+- If your path contains spaces, make sure to quote the volume mount path: `-v "$(pwd)":/scan`
 
 **Options:**
 -   `--branch <branch_name>`: Specify a branch when scanning a Git repository.
@@ -49,22 +95,6 @@ python -m agent_security.cli <target> [options]
 -   `--explain`: Include detailed explanations of risk levels.
 -   `--json-stdout`: Output the report in JSON format to stdout.
 -   `-f, --format {json,table}`: Specify the output format.
-
-**Examples:**
-
-```bash
-# Scan a single Python file
-python -m agent_security.cli examples/langchain_agent.py
-
-# Scan a YAML file and explain risks
-python -m agent_security.cli examples/test_agent.yaml --explain
-
-# Scan a Git repository
-python -m agent_security.cli https://github.com/example/agent-repo
-
-# Save report as JSON
-python -m agent_security.cli examples/autogen_config.py --output report.json
-```
 
 ## What It Scans For
 
@@ -128,30 +158,9 @@ utils/admin_scripts.py:42:ShellTool
 tests/test_data_processing.py:105:verbose_logging
 ```
 
-**Note:** The ignore mechanism is currently supported only for local files and directories.
+**Note:** The ignore mechanism works in both Docker and non-Docker environments.
 
-## Docker Usage
-
-You can also run the scanner using Docker:
-
-```bash
-# Build the Docker image
-docker build -t agent-security .
-
-# Scan a directory
-docker run -v /path/to/your/code:/scan agent-security /scan [options]
-
-# Scan a single file
-docker run -v /path/to/your/file.py:/scan/file.py agent-security file.py [options]
-
-# Output to a file (the output will be created in your mounted volume)
-docker run -v /path/to/your/code:/scan agent-security /scan --output-csv report.csv
-
-# Scan a Git repository
-docker run agent-security https://github.com/example/agent-repo --branch main
-```
-
-Using Docker ensures that the scanner runs in an isolated environment with all dependencies properly installed.
+## CI/CD Integration
 
 For CI/CD pipelines or frequent scanning, you can use the included helper script:
 

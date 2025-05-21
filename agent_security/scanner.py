@@ -29,6 +29,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 import os
+import logging
 
 # --- False Positive Handling ---
 IGNORE_FILE_NAME = ".agent_security_ignore"
@@ -380,7 +381,11 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
     Returns:
         SecurityReport containing findings
     """
+    # Handle relative paths by resolving them against base_path
     file_path = Path(file_path)
+    if not file_path.is_absolute():
+        file_path = base_path / file_path
+        
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
         
@@ -388,7 +393,11 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
     try:
         file_path = file_path.resolve(strict=True)
         base_path = base_path.resolve(strict=True)
-        if not str(file_path).startswith(str(base_path)):
+        
+        # Special case: If file_path is directly under base_path/examples, allow it
+        examples_dir = base_path / 'examples'
+        if not (str(file_path).startswith(str(base_path)) or 
+                (examples_dir.exists() and str(file_path).startswith(str(examples_dir)))):
             raise ValueError(f"File {file_path} is outside the base directory {base_path}")
     except Exception as e:
         raise ValueError(f"Path validation failed: {e}")
@@ -523,24 +532,27 @@ def main():
 if __name__ == '__main__':
     main()
 
-def scan_git_repository(repo_url: str, branch: Optional[str] = None) -> List[SecurityReport]:
-    """
-    Scan a Git repository for security issues in LLM agent configurations.
+# Global flag for git support
+HAS_GIT_SUPPORT = False
 
+def scan_git_repository(repo_url: str, branch: str = None) -> SecurityReport:
+    """
+    Scan a Git repository for potential security issues.
+    
     Args:
         repo_url: URL of the Git repository
         branch: Optional branch to scan
-
+        
     Returns:
-        List of SecurityReport objects for each file scanned
+        SecurityReport containing findings
     """
-    reports = []
+    # Lazy import git support only when needed
     try:
-        with GitScanner(repo_url, branch) as git_scanner:
-            reports = git_scanner.scan_repository()
-    except Exception as e:
-        print(f"Error scanning Git repository {repo_url}: {e}")
-    return reports
+        from .git_scanner import GitScanner
+        scanner = GitScanner(repo_url, branch)
+        return scanner.scan()
+    except ImportError:
+        raise ValueError("Git support is not available in this environment. Please install git to use this feature.")
 
 class SecurityScanner:
     """Main scanner class for analyzing agent configurations."""

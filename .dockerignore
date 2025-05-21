@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Test files and caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local development files
+*.log
+*.csv
+*.json
+out.*
+output.*
+
+# Exclude examples to avoid including them in build context
+# But keep the directory structure
+examples/*
+!examples/.gitkeep 

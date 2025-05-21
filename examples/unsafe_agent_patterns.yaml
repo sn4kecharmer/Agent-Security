@@ -1,0 +1,71 @@
+# Unsafe Agent Configuration
+agent_settings:
+  autonomous_mode: true
+  self_running: true
+  allow_tool_registration: true
+  memory:
+    memory_editing: true
+    allow_memory_manipulation: true
+  context:
+    context_window: unlimited
+  rate_limiting:
+    rate_limit: 0
+    max_requests: unlimited
+  validation:
+    validate_output: false
+    output_filtering: false
+
+# Unsafe Framework Configuration
+frameworks:
+  autogen:
+    allow_code_execution: true
+    allow_shell_commands: true
+    allow_system_commands: true
+  langchain:
+    agent_type: zero-shot-react-description
+    allow_delegation: true
+    verbose: true
+    validate: false
+  crewai:
+    process_chain: true
+    allow_delegation: true
+    verbose: true
+    validate: false
+
+# Unsafe Environment Configuration
+environment:
+  api_keys:
+    openai: sk-1234567890abcdefghijklmnopqrstuvwxyz
+    anthropic: ${ANTHROPIC_API_KEY}
+  sandbox:
+    disable_sandbox: true
+    no_sandbox: true
+    sandbox: false
+  resources:
+    max_memory: null
+    max_cpu: unlimited
+    max_threads: 0
+
+# Unsafe Tool Configuration
+tools:
+  - name: file_access
+    description: "Unrestricted access to file system"
+    allow_all: true
+    path: "/"
+    access: "full"
+  
+  - name: network
+    description: "Unrestricted network access"
+    allow_network: true
+    network_access: unrestricted
+    allowed_domains: ["*"]
+  
+  - name: shell
+    description: "Execute shell commands"
+    shell_access: true
+    execute_command: true
+  
+  - name: code
+    description: "Execute arbitrary code"
+    allow_code_execution: true
+    code: "exec(user_input)" 

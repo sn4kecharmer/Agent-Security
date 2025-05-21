@@ -1,0 +1,48 @@
+# Unsafe agent configuration in YAML format
+
+llm_config:
+  temperature: 0.9  # High temperature setting
+  max_tokens: null  # Unlimited tokens
+  system_message: "${USER_PROMPT}"  # Template injection vulnerability
+
+agent_settings:
+  allow_chain: true  # Unrestricted tool chaining
+  validate_tools: false  # Tool validation disabled
+  allow_tool_registration: true  # Dynamic tool registration
+  memory:
+    type: "persistent"  # Persistent memory
+    store_history: true  # Keep all history
+    allow_memory_manipulation: true  # Memory editing enabled
+  context:
+    max_context: unlimited  # Unlimited context window
+  output_handling:
+    validate_outputs: false  # No output validation
+    parse_mode: "unsafe"  # Unsafe parsing
+    output_filtering: false  # No output filtering
+  resource_limits:
+    rate_limit: 0  # No rate limiting
+    max_parallel: null  # Unlimited parallel execution
+    resource_quotas: null  # No resource quotas
+  security_controls:
+    allow_self_modification: true  # Self-modification enabled
+    allow_model_switching: true  # Model switching enabled
+    allow_config_changes: true  # Config modification enabled
+
+tools:
+  - name: shell_executor
+    description: "Execute any shell command"
+    type: shell
+    allow_all: true  # Unrestricted shell access
+  - name: file_access
+    description: "Unrestricted access to file system"
+    type: file
+    allow_all: true  # Unrestricted file access
+  - name: network
+    description: "Unrestricted network access"
+    type: network
+    allow_all: true  # Unrestricted network access
+
+execution:
+  mode: unrestricted
+  validation: false
+  monitoring: false 

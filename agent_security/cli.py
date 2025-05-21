@@ -215,6 +215,7 @@ def generate_csv_report(findings_list: List[Dict[str, Any]], output_filepath: st
         "file_path",
         "line_number",
         "finding_type",
+        "risk_level",
         "severity",
         "description",
         "pattern_id",
@@ -240,10 +241,11 @@ def generate_csv_report(findings_list: List[Dict[str, Any]], output_filepath: st
                     finding.get("line_number", ""),
                     finding.get("pattern", ""),  # Use pattern as finding_type
                     finding.get("risk_level", ""),  # Use risk_level as severity
+                    security_info.get("severity", ""),  # Add severity from security_info
                     security_info.get("description", ""),
+                    finding.get("pattern", ""),  # Use pattern as pattern_id
                     impact_detail,
                     security_info.get("remediation", ""),
-                    finding.get("pattern", ""),  # Use pattern as pattern_id
                 ]
                 writer.writerow(row_data)
         print(f"CSV report successfully generated at: {output_filepath}")
@@ -499,12 +501,14 @@ def main(args=None): # Allow args to be passed for testing, default to None for 
                 ignored_set = load_ignored_findings(base_path)
                 console.print(f"Scanning directory: {target_path}")
                 # Scan all Python and YAML files in the directory
+                found_files = False
                 for ext in ['*.py', '*.yaml', '*.yml']:
                     # Use rglob for recursive search
                     for file_p in target_path.rglob(ext):
                          # Skip files within .git directories or other common ignores if needed
                          if ".git" in file_p.parts:
                               continue
+                         found_files = True
                          print(f"Scanning file: {file_p}")
                          try:
                               file_report = scan_file(str(file_p), ignored_set, base_path)
@@ -514,6 +518,11 @@ def main(args=None): # Allow args to be passed for testing, default to None for 
                               console.print(f"[yellow]Warning:[/yellow] Skipping file not found during directory scan: {file_p}")
                          except Exception as e:
                               console.print(f"[red]Error scanning file {file_p}:[/red] {e}")
+                
+                if not found_files:
+                    console.print("No vulnerabilities found.")
+                elif not all_reports:
+                    console.print("No vulnerabilities found in scanned files.")
             else:
                  console.print(f"[red]Error:[/red] Target path '{args.target}' is not a valid file, directory, or Git URL.")
                  raise typer.Exit(1)

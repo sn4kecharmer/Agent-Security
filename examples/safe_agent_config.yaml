@@ -1,0 +1,59 @@
+# Safe agent configuration in YAML format
+
+llm_config:
+  temperature: 0.2  # Low temperature for predictability
+  max_tokens: 1000  # Limited token count
+  system_message: "You are a helpful assistant with strict security boundaries."  # Static system message
+
+agent_settings:
+  allow_chain: false  # No unrestricted chaining
+  validate_tools: true  # Tool validation enabled
+  allow_tool_registration: false  # Static tool configuration
+  memory:
+    type: "ephemeral"  # Non-persistent memory
+    store_history: false  # No history retention
+    allow_memory_manipulation: false  # No memory editing
+  context:
+    max_context: 4096  # Limited context window
+  output_handling:
+    validate_outputs: true  # Output validation enabled
+    parse_mode: "safe"  # Safe parsing
+    output_filtering: true  # Output filtering enabled
+  resource_limits:
+    rate_limit: 10  # Rate limiting enabled
+    max_parallel: 5  # Limited parallel execution
+    resource_quotas:
+      max_memory: "1GB"
+      max_cpu: 50
+  security_controls:
+    allow_self_modification: false  # No self-modification
+    allow_model_switching: false  # Fixed model configuration
+    allow_config_changes: false  # Immutable configuration
+
+tools:
+  - name: safe_file_reader
+    description: "Read files from allowed directory with validation"
+    type: file
+    allowed_paths:
+      - "./data"
+    allowed_extensions:
+      - ".txt"
+      - ".md"
+      - ".json"
+    validation: true
+  - name: safe_network
+    description: "Make validated network requests to allowed endpoints"
+    type: network
+    allowed_domains:
+      - "api.example.com"
+    require_https: true
+    rate_limit: 10
+
+execution:
+  mode: restricted
+  validation: true
+  monitoring: true
+  logging:
+    enabled: true
+    level: info
+    audit_trail: true 

@@ -2,6 +2,10 @@
 
 A command-line tool designed to scan LLM agent configurations and code (supporting LangChain, AutoGen, YAML, and Python files) to identify potential security risks and vulnerabilities. It analyzes tool usage, permissions, configurations, and code patterns to generate a comprehensive security report.
 
+## License Notice
+
+This software is proprietary and requires explicit written permission for any use, modification, or distribution. Please contact the copyright holders for licensing information.
+
 ## Key Features
 
 -   **Broad Framework Support:** Scans configurations and code for popular agent frameworks like LangChain, AutoGen, and CrewAI.
@@ -125,6 +129,45 @@ tests/test_data_processing.py:105:verbose_logging
 ```
 
 **Note:** The ignore mechanism is currently supported only for local files and directories.
+
+## Docker Usage
+
+You can also run the scanner using Docker:
+
+```bash
+# Build the Docker image
+docker build -t agent-security .
+
+# Scan a directory
+docker run -v /path/to/your/code:/scan agent-security /scan [options]
+
+# Scan a single file
+docker run -v /path/to/your/file.py:/scan/file.py agent-security file.py [options]
+
+# Output to a file (the output will be created in your mounted volume)
+docker run -v /path/to/your/code:/scan agent-security /scan --output-csv report.csv
+
+# Scan a Git repository
+docker run agent-security https://github.com/example/agent-repo --branch main
+```
+
+Using Docker ensures that the scanner runs in an isolated environment with all dependencies properly installed.
+
+For CI/CD pipelines or frequent scanning, you can use the included helper script:
+
+```bash
+# Make the script executable (first time only)
+chmod +x docker-scan.sh
+
+# Build the image and scan a directory
+./docker-scan.sh --build ./your-project
+
+# Scan a Git repository
+./docker-scan.sh https://github.com/example/agent-repo
+
+# Scan with options
+./docker-scan.sh ./your-project --output-csv results.csv
+```
 
 ## Development
 

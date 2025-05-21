@@ -1,6 +1,26 @@
 #!/bin/bash
 # Docker-based scanner helper script for CI/CD pipelines
 
+# Help text function
+show_help() {
+    echo "Usage: $0 [--build] <target> [options]"
+    echo ""
+    echo "Examples:"
+    echo "  $0 my_agent.yaml"
+    echo "  $0 /full/path/to/my_agent.yaml"
+    echo "  $0 ./my_agents_directory"
+    echo "  $0 --build ./my_agent.yaml    # Build container first, then scan"
+    echo ""
+    echo "This script will scan your local files or directories for agent security issues"
+    echo "using the agent-security Docker container."
+    exit 1
+}
+
+# Show help if no arguments or help flag
+if [[ "$1" == "" ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+fi
+
 # Build the Docker image if needed
 if [[ "$1" == "--build" ]]; then
     echo "Building Docker image..."
@@ -11,9 +31,7 @@ fi
 # Check if target is provided
 if [[ -z "$1" ]]; then
     echo "Error: No target specified."
-    echo "Usage: $0 [--build] <target> [options]"
-    echo "Example: $0 ./src --output-csv results.csv"
-    exit 1
+    show_help
 fi
 
 TARGET="$1"
@@ -33,7 +51,7 @@ else
         DIRNAME=$(dirname "$ABSOLUTE_PATH")
         FILENAME=$(basename "$ABSOLUTE_PATH")
         echo "Scanning file: $FILENAME"
-        docker run --rm -v "$DIRNAME:/scan" agent-security "$FILENAME" "$@"
+        docker run --rm -v "$DIRNAME:/scan" agent-security "/scan/$FILENAME" "$@"
     elif [[ -d "$ABSOLUTE_PATH" ]]; then
         # Directory
         echo "Scanning directory: $ABSOLUTE_PATH"

@@ -1,3 +1,4 @@
+# Use Python 3.11 slim as base image
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -18,4 +19,17 @@ COPY . .
 ENTRYPOINT ["python", "-m", "agent_security"]
 
 # Default command to scan examples directory
-CMD ["examples"] 
+CMD ["examples"]
+
+# Usage Instructions:
+# To scan built-in examples:
+#   docker run agent-security
+#
+# To scan a specific built-in example:
+#   docker run agent-security examples/va.yaml
+#
+# To scan files from your local filesystem:
+#   docker run -v $(pwd):/local agent-security /local/path/to/your/file.yaml
+#
+# To scan a directory from your local filesystem:
+#   docker run -v $(pwd):/local agent-security /local/path/to/your/directory 

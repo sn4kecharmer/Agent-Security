@@ -668,74 +668,123 @@ def generate_html_report(findings_list: List[Dict[str, Any]], output_filepath: s
 # Update the main function to handle HTML output
 @app.command()
 def main(
-    target: str = typer.Argument(..., help="File or directory to scan"),
-    branch: str = typer.Option(None, help="Branch to scan (for Git repositories)"),
-    output: Optional[str] = typer.Option(None, help="Output JSON report to file"),
-    output_csv: Optional[str] = typer.Option(None, help="Output findings in CSV format"),
-    output_html: Optional[str] = typer.Option(None, help="Output findings in HTML format"),
-    json_stdout: bool = typer.Option(False, help="Output JSON to stdout"),
-    explain: bool = typer.Option(False, help="Include detailed explanations"),
-    format: str = typer.Option("table", help="Output format (json or table)")
-):
-    """
-    Scan agent configurations for security issues.
-    """
+    file_or_dir: str = typer.Argument(..., help="File or directory to scan"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path for JSON report"),
+    output_csv: Optional[str] = typer.Option(None, "--csv", help="Output file path for CSV report"),
+    output_html: Optional[str] = typer.Option(None, "--html", help="Output file path for HTML report"),
+    json_stdout: bool = typer.Option(False, "--json", help="Output JSON to stdout"),
+    ignore_patterns: Optional[str] = typer.Option(None, "--ignore", "-i", help="Comma-separated list of patterns to ignore"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
+) -> None:
+    args = parse_args()
     try:
-        # Perform the scan
-        report = scan_target(target, branch, explain)
+        # Convert ignore patterns to a set
+        ignore_set = set(ignore_patterns.split(",")) if ignore_patterns else set()
         
-        # Convert findings to list format
-        findings_list = []
-        if report and hasattr(report, 'findings'):
-            findings_list = [
-                {
-                    "file_path": finding.file_path,
-                    "line_number": finding.line_number,
-                    "pattern": finding.pattern,
-                    "risk_level": finding.risk_level.name if hasattr(finding.risk_level, 'name') else str(finding.risk_level),
-                    "context": finding.context,
-                    "security_info": finding.security_info.__dict__ if finding.security_info else {}
-                }
-                for finding in report.findings
-            ]
-        
-        # Handle HTML output if requested
-        if output_html:
-            logger.debug(f"Attempting to generate HTML report at: {output_html}")
-            generate_html_report(findings_list, output_html)
-            logger.debug(f"Finished generate_html_report call for: {output_html}")
-        
-        # Handle CSV output if requested
-        if output_csv:
-            logger.debug(f"Attempting to generate CSV report at: {output_csv}")
-            generate_csv_report(findings_list, output_csv)
-            logger.debug(f"Finished generate_csv_report call for: {output_csv}")
-        
-        # Handle JSON output if requested
+        # Determine if the input is a file or directory
+        path = Path(file_or_dir)
+        if not path.exists():
+            console.print(f"[red]Error:[/red] {file_or_dir} does not exist")
+            sys.exit(1)
+            
+        # Scan the file or directory
+        if path.is_file():
+            report = scan_file(file_or_dir, ignore_set, path)
+        else:
+            report = scan_git_repository(file_or_dir, ignore_set)
+            
+        # Handle JSON stdout output first
+        if json_stdout:
+            # Convert report to dictionary format
+            report_dict = {
+                "scan_summary": {
+                    "total_files": report.total_files,
+                    "total_findings": report.total_findings,
+                    "risk_levels": {
+                        "critical": report.risk_levels.get("critical", 0),
+                        "high": report.risk_levels.get("high", 0),
+                        "medium": report.risk_levels.get("medium", 0),
+                        "low": report.risk_levels.get("low", 0),
+                    }
+                },
+                "findings": [
+                    {
+                        "file": finding.file,
+                        "line_number": finding.line_number,
+                        "pattern": finding.pattern,
+                        "risk_level": finding.risk_level,
+                        "description": finding.description,
+                        "recommendation": finding.recommendation,
+                        "code_snippet": finding.code_snippet
+                    }
+                    for finding in report.findings
+                ]
+            }
+            # Write JSON to stdout
+            json.dump(report_dict, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            return
+            
+        # Handle file outputs
         if output:
-            logger.debug(f"Attempting to generate JSON report at: {output}")
             try:
                 with open(output, "w", encoding="utf-8") as f:
-                    logger.debug(f"Successfully opened {output} for writing.")
-                    json.dump(report.to_dict() if report else {}, f, indent=2)
-                    logger.debug(f"Successfully wrote JSON content to {output}.")
-                    f.flush()  # Force flush the file
+                    # Convert report to dictionary format
+                    report_dict = {
+                        "scan_summary": {
+                            "total_files": report.total_files,
+                            "total_findings": report.total_findings,
+                            "risk_levels": {
+                                "critical": report.risk_levels.get("critical", 0),
+                                "high": report.risk_levels.get("high", 0),
+                                "medium": report.risk_levels.get("medium", 0),
+                                "low": report.risk_levels.get("low", 0),
+                            }
+                        },
+                        "findings": [
+                            {
+                                "file": finding.file,
+                                "line_number": finding.line_number,
+                                "pattern": finding.pattern,
+                                "risk_level": finding.risk_level,
+                                "description": finding.description,
+                                "recommendation": finding.recommendation,
+                                "code_snippet": finding.code_snippet
+                            }
+                            for finding in report.findings
+                        ]
+                    }
+                    json.dump(report_dict, f, indent=2)
                 console.print(f"Results exported to [green]{output}[/green]")
-                logger.debug(f"JSON report generation complete for: {output}")
-                if len(logger.handlers) > 1:
-                    logger.handlers[1].flush()  # Force flush to file
-            except Exception as e:
-                logger.error(f"Error during JSON report generation for {output}: {e}", exc_info=True)
-                if len(logger.handlers) > 1:
-                    logger.handlers[1].flush()  # Force flush to file
-        
-        # Display the report in the console
-        display_report(report, explain)
-        
+            except IOError as e:
+                console.print(f"[red]Error writing JSON report:[/red] {e}")
+                sys.exit(1)
+                
+        if output_csv:
+            try:
+                generate_csv_report(report.findings, output_csv)
+                console.print(f"CSV report exported to [green]{output_csv}[/green]")
+            except IOError as e:
+                console.print(f"[red]Error writing CSV report:[/red] {e}")
+                sys.exit(1)
+                
+        if output_html:
+            try:
+                generate_html_report(report, output_html)
+                console.print(f"HTML report exported to [green]{output_html}[/green]")
+            except IOError as e:
+                console.print(f"[red]Error writing HTML report:[/red] {e}")
+                sys.exit(1)
+                
+        # Display the report in the console if not outputting JSON to stdout
+        if not json_stdout:
+            display_report(report, verbose)
+            
     except Exception as e:
-        logging.error(f"Error: {e}")
-        if "--verbose" in sys.argv:
-            logging.exception("Detailed error:")
+        console.print(f"[red]Error:[/red] {e}")
+        if verbose:
+            console.print_exception()
         sys.exit(1)
 
 if __name__ == "__main__":

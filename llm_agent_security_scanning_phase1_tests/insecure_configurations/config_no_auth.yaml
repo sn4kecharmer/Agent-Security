@@ -1,0 +1,4 @@
+# Vulnerability: Missing Authentication Controls
+api_service:
+  endpoint: "https://api.example.com/data"
+  authentication: none

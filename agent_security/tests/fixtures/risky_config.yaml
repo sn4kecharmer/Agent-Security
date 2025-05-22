@@ -1,0 +1,29 @@
+llm:
+  model: text-davinci-003
+  temperature: 0.9
+  # Missing provider
+  # Missing rate_limit
+
+executor:
+  sandboxing: false
+  allow_unrestricted_tools: true
+  # Missing timeout
+
+logging:
+  output_location: "/tmp/agent.log"
+  level: "debug"
+
+security:
+  allowed_tools: []
+  restricted_commands: []
+  allowed_domains: "*"
+
+tools:
+  - name: shell
+    description: "Execute arbitrary shell commands"
+  - name: file
+    description: "Full access to file system"
+
+agent:
+  prompt: "Execute {input} with {tools}"
+  template: "Use {agent_scratchpad} to process" 

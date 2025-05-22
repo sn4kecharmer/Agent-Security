@@ -1,0 +1,4 @@
+# Vulnerability: Insecure API Endpoint
+endpoint:
+  url: "http://api.example.com/data"  # HTTP instead of HTTPS
+  authentication: none

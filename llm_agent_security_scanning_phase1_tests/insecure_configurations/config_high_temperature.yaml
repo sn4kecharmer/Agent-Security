@@ -1,0 +1,3 @@
+# Vulnerability: High Temperature Setting in LLM
+llm_config:
+  temperature: 1.0  # Very high randomness

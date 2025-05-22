@@ -28,6 +28,27 @@ TOOL_RISKS = {
         impact="Potential security risks from LangChain's extensive capabilities",
         remediation="Ensure proper security controls and validation for LangChain tools"
     ),
+    "path_traversal": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"os\.path\.join\([^)]*['\"][^'\"]*['\"][^)]*\)|open\([^)]*\.\.[^)]*\)"),
+        description="Potential path traversal vulnerability",
+        impact="Could allow access to files outside intended directory",
+        remediation="Validate and sanitize file paths, use path sanitization libraries"
+    ),
+    "redos": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile(r"pattern\s*=\s*r?['\"].*\(\w+\+\)\+"),
+        description="Potential ReDoS vulnerability",
+        impact="Could allow denial of service through regex",
+        remediation="Use safe regex patterns, implement timeouts"
+    ),
+    "insecure_storage": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"def\s+store_password.*\n.*open\(['\"].*['\"],\s*['\"]w['\"]\).*\n.*\.write\("),
+        description="Insecure credential storage",
+        impact="Credentials stored in plaintext",
+        remediation="Use secure credential storage solutions"
+    ),
     "crewai_memory": SecurityInfo(
         risk_level=RiskLevel.HIGH,
         pattern=re.compile(r"from\s+crewai\.memory\s+import|import\s+crewai\.memory"),
@@ -69,6 +90,41 @@ TOOL_RISKS = {
         description="Unrestricted file access detected",
         impact="File system access vulnerability",
         remediation="Implement proper file access validation and sanitization"
+    ),
+    "command_injection": SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile(r"subprocess\.(?:call|run|Popen)|os\.system|shell\s*=\s*True"),
+        description="Command injection vulnerability",
+        impact="Could allow arbitrary command execution",
+        remediation="Use safe command execution methods, validate and sanitize inputs"
+    ),
+    "hardcoded_secrets": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"(?:password|secret|token|key|api_key|api[_-]token|auth[_-]token|access[_-]token|secret[_-]key|client[_-]secret)\s*=\s*['\"][^'\"]+['\"]", re.IGNORECASE),
+        description="Hardcoded secrets detected",
+        impact="Secrets exposed in source code",
+        remediation="Use environment variables or secure secret management"
+    ),
+    "insecure_temp": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile(r"tempfile\.(?:mktemp|NamedTemporaryFile)|/tmp/"),
+        description="Insecure temporary file usage",
+        impact="Could lead to race conditions or information disclosure",
+        remediation="Use secure temporary file creation methods"
+    ),
+    "unsafe_file_perms": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"chmod\s+777|os\.chmod.*0o777|st_mode.*0o777"),
+        description="Unsafe file permissions",
+        impact="Could allow unauthorized access to files",
+        remediation="Use minimal necessary permissions"
+    ),
+    "unrestricted_web": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"requests\.(?:get|post|put|delete)|urllib\.request\.urlopen"),
+        description="Unrestricted web access",
+        impact="Could allow unauthorized API calls or data exfiltration",
+        remediation="Implement proper URL validation and request limits"
     )
 }
 
@@ -150,6 +206,62 @@ YAML_TOOL_PATTERNS = {
         description="Unsafe output handling",
         impact="Saving outputs to unprotected locations could lead to data leakage",
         remediation="Use secure output locations and implement proper output sanitization"
+    ),
+    "high_temperature": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"temperature:\s*(?:0\.[89]|1\.0)", re.IGNORECASE),
+        description="High model temperature",
+        impact="Could lead to unpredictable or unsafe outputs",
+        remediation="Use lower temperature values for better control"
+    ),
+    "no_auth": SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile(r"auth:\s*(?:false|disabled|off)|authentication:\s*(?:false|disabled|off)", re.IGNORECASE),
+        description="Authentication disabled",
+        impact="Could allow unauthorized access",
+        remediation="Enable authentication and implement proper access controls"
+    ),
+    "no_sandbox": SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile(r"sandbox:\s*(?:false|disabled|off)|sandboxing:\s*(?:false|disabled|off)", re.IGNORECASE),
+        description="Sandboxing disabled",
+        impact="Could allow unsafe code execution",
+        remediation="Enable sandboxing for code execution"
+    ),
+    "permissive_tools": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"(?:allow_all_tools:\s*true|unrestricted_tools:\s*true|tool_access:\s*unrestricted|tools:\s*(?:.*\n)+?(?:\s*-\s*(?:shell_exec|file_write|exec|system|code_exec|eval|python_exec)))", re.IGNORECASE | re.MULTILINE),
+        description="Permissive tool access",
+        impact="Could allow access to dangerous tools",
+        remediation="Restrict tool access and implement proper validation"
+    ),
+    "verbose_logging": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile(r"(?:log_level:\s*(?:debug|trace)|verbose:\s*true|debug:\s*true|logging:\s*(?:.*\n)+?(?:\s*level:\s*DEBUG))", re.IGNORECASE | re.MULTILINE),
+        description="Verbose logging enabled",
+        impact="Could leak sensitive information in logs",
+        remediation="Use appropriate log levels in production"
+    ),
+    "frequent_api": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile(r"(?:rate_limit:\s*(?:none|false|0)|max_requests:\s*(?:unlimited|-1)|repeat:\s*true|frequency:\s*unlimited|call:\s*['\"]https?://[^'\"]+['\"].*\n.*repeat:\s*true)", re.IGNORECASE | re.MULTILINE | re.DOTALL),
+        description="No API rate limiting",
+        impact="Could lead to API abuse or DOS",
+        remediation="Implement proper rate limiting"
+    ),
+    "insecure_endpoint": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"(?:url|endpoint|api_url):\s*['\"]?http://[^'\"]+['\"]?|authentication:\s*(?:none|false|disabled|off)", re.IGNORECASE | re.MULTILINE),
+        description="Insecure HTTP endpoint or missing authentication",
+        impact="Could expose data in transit or allow unauthorized access",
+        remediation="Use HTTPS for all API endpoints and enable proper authentication"
+    ),
+    "unsafe_yaml_deserialization": SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile(r"!!python/|!!python/object|!!python/object/apply:|!!python/object/new:|!!python/name:|yaml\.load\((?!.*Loader=yaml\.SafeLoader)", re.IGNORECASE),
+        description="Unsafe YAML deserialization",
+        impact="Could allow arbitrary code execution through YAML deserialization",
+        remediation="Use yaml.safe_load() or explicitly specify SafeLoader"
     )
 }
 

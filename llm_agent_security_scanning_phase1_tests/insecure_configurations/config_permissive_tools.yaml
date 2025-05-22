@@ -1,0 +1,5 @@
+# Vulnerability: Overly Permissive Tool Access
+agent:
+  tools:
+    - file_write
+    - shell_exec

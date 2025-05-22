@@ -1,0 +1,3 @@
+# Vulnerability: Unsafe YAML Deserialization
+!!python/object/apply:subprocess.Popen
+- ["/bin/echo", "malicious"]

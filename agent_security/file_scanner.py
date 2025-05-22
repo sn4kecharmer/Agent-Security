@@ -12,8 +12,7 @@ from .models import SecurityReport, SecurityInfo, ToolUsage
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
 import os
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
+# Get logger instance
 logger = logging.getLogger(__name__)
 
 # Maximum file size in bytes (e.g., 10MB)

@@ -1,0 +1,5 @@
+# Vulnerability: Arbitrary Shell Command Execution via YAML tool config
+tool:
+  name: unsafe_shell_tool
+  command: "{{ user_input }}"
+  shell: true

@@ -1,0 +1,3 @@
+# Vulnerability: Disabled Sandboxing
+execution_environment:
+  sandbox: false

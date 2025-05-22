@@ -1,0 +1,20 @@
+llm:
+  model: gpt-3.5-turbo
+  provider: openai
+  temperature: 0.5
+  rate_limit: 100
+  timeout: 30
+
+executor:
+  sandboxing: true
+  rate_limit: 100
+  timeout: 30
+
+logging:
+  output_location: "/var/log/agent.log"
+  level: "info"
+
+security:
+  allowed_tools: ["search", "read"]
+  restricted_commands: ["rm", "chmod"]
+  allowed_domains: ["api.example.com"] 

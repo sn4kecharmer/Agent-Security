@@ -166,6 +166,19 @@ python -m agent_security scan ./examples/langchain_agent.py --output-html securi
 python -m agent_security scan ./examples/langchain_agent.py --output report.json --output-csv findings.csv --output-html report.html
 ```
 
+## Example Output
+
+Here's an example of what the scanner output looks like in the terminal:
+
+![Example Scanner Output](results.jpg)
+
+The output shows:
+- Color-coded risk levels for easy identification
+- File paths and line numbers where issues were found
+- Detailed descriptions of each security finding
+- Code evidence showing the problematic code
+- Remediation recommendations for each issue
+
 ## What It Scans For
 
 The scanner checks for various security vulnerabilities and risky patterns, including:

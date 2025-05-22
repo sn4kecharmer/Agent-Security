@@ -251,3 +251,23 @@ chmod +x docker-scan.sh
 ## Development
 
 This project aims to follow best practices for secure and maintainable code. Contributions are welcome.
+
+## Recent Enhancements and Security Fixes
+
+Recent improvements to the Agent Security Scanner include:
+
+- **Enhanced Detection Patterns**: Updated regex patterns to detect a wider range of security vulnerabilities including:
+  - Hardcoded secrets (API keys, tokens, passwords) with case-insensitive matching
+  - Unsafe YAML deserialization vulnerabilities (including !!python/object tags)
+  - Overly permissive tool access patterns (shell_exec, file_write capabilities)
+  - Verbose logging configurations that could leak sensitive data
+
+- **Improved YAML Parsing**: Added special handling for YAML parsing errors to detect deserialization vulnerabilities
+
+- **Cleaner Output**: Removed debug statements and improved logging for cleaner output
+
+- **Simplified Path Display**: HTML reports now show simplified file paths (directory/filename) for better readability
+
+- **Multiple Output Formats**: Added support for HTML, JSON, and CSV output formats
+
+- **Reliability Improvements**: Fixed issues with file creation and error handling

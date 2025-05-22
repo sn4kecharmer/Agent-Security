@@ -1,11 +1,8 @@
 """
-Main entry point for the Agent Security Scanner.
+Main entry point for the agent_security package.
 """
-import sys
-from .cli import app
 
-def main():
-    app()
+from .scanner import main
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

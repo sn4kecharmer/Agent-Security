@@ -31,6 +31,9 @@ from rich.text import Text
 import os
 import logging
 
+# Set up logger
+logger = logging.getLogger("agent_security")
+
 # --- False Positive Handling ---
 IGNORE_FILE_NAME = ".agent_security_ignore"
 
@@ -68,11 +71,11 @@ def load_ignored_findings(base_path: Path) -> Set[Tuple[str, int, str]]:
                             relative_file = str(file_path.relative_to(ignore_file_path.parent))
                             ignored.add((relative_file, line_num, pattern))
                         except (ValueError, TypeError):
-                            print(f"Warning: Skipping invalid ignore entry: {line}")
+                            logger.warning(f"Skipping invalid ignore entry: {line}")
                     else:
-                        print(f"Warning: Skipping malformed ignore entry: {line}")
+                        logger.warning(f"Skipping malformed ignore entry: {line}")
         except IOError as e:
-            print(f"Warning: Could not read ignore file {ignore_file_path}: {e}")
+            logger.warning(f"Could not read ignore file {ignore_file_path}: {e}")
     return ignored
 
 def is_finding_ignored(finding: SecurityFinding, ignored_set: Set[Tuple[str, int, str]], base_path: Path) -> bool:
@@ -251,7 +254,7 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
             report.overall_risk = max(risk_levels)
 
     except Exception as e:
-        print(f"Error scanning Python file {file_path}: {e}")
+        logger.error(f"Error scanning Python file {file_path}: {e}")
         report.overall_risk = RiskLevel.CRITICAL
         report.metadata = {"error": str(e)}
 
@@ -264,7 +267,7 @@ def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[
     report = SecurityReport(
         findings=[],
         overall_risk=RiskLevel.LOW,
-        file_path=file_path,
+        file_path=str(file_path),
         timestamp=datetime.now().isoformat()
     )
 
@@ -355,7 +358,8 @@ def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[
                     scan_nested(item, current_path, parent_key, line_number)
 
         # Start scanning from the root
-        scan_nested(data)
+        if data is not None:
+            scan_nested(data)
         
         # Calculate overall risk based on findings
         if report.findings:
@@ -363,9 +367,54 @@ def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[
             report.overall_risk = max(risk_levels)
         
     except Exception as e:
-        print(f"Error scanning YAML file {file_path}: {e}")
-        report.overall_risk = RiskLevel.CRITICAL
-        report.metadata = {"error": str(e)}
+        # Check if this is a YAML deserialization error
+        error_msg = str(e)
+        if "python/object" in error_msg or "!!python" in error_msg or "could not determine a constructor" in error_msg:
+            # This is likely an unsafe YAML deserialization issue
+            # Create a security finding for it
+            yaml_deser_info = SecurityInfo(
+                risk_level=RiskLevel.CRITICAL,
+                pattern=re.compile(r"!!python"),  # Dummy pattern
+                description="Unsafe YAML deserialization",
+                impact="Could allow arbitrary code execution through YAML deserialization",
+                remediation="Use yaml.safe_load() or explicitly specify SafeLoader",
+                severity="🔴",
+                confidence="High",
+                category="",
+                cwe=[],
+                owasp=[]
+            )
+            
+            # Try to get the line number from the error message
+            line_match = re.search(r"line (\d+)", error_msg)
+            line_number = int(line_match.group(1)) if line_match else 1
+            
+            # Get context lines if possible
+            context = ""
+            try:
+                lines = content.splitlines()
+                start = max(0, line_number - 2)
+                end = min(len(lines), line_number + 3)
+                context = "\n".join(lines[start:end])
+            except:
+                context = "Error extracting context: " + error_msg
+            
+            finding = SecurityFinding(
+                pattern="unsafe_yaml_deserialization",
+                risk_level=RiskLevel.CRITICAL,
+                line_number=line_number,
+                context=context,
+                security_info=yaml_deser_info,
+                file_path=file_path
+            )
+            
+            report.findings.append(finding)
+            report.overall_risk = RiskLevel.CRITICAL
+            logger.info(f"Found unsafe YAML deserialization in {file_path}")
+        else:
+            logger.error(f"Error scanning YAML file {file_path}: {e}")
+            report.overall_risk = RiskLevel.CRITICAL
+            report.metadata = {"error": str(e)}
         
     return report
 
@@ -419,83 +468,103 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
 
 def print_report(report: SecurityReport):
     """
-    Print a formatted security report.
+    Print a formatted security report, grouped by file with no column truncation.
     
     Args:
         report: SecurityReport to print
     """
     console = Console()
     
-    # Print file information
-    console.print(f"\n[bold]Security Report for: {report.file_path}[/bold]")
-    console.print(f"Generated: {report.timestamp}")
-    console.print(f"Overall Risk Level: [bold]{report.overall_risk.name}[/bold]")
-    
     if not report.findings:
-        console.print("[green]No security issues found![/green]")
+        console.print("\nNo vulnerabilities found.")
         return
-    
-    # Group findings by risk level
-    findings_by_risk = {}
+
+    # Group findings by file
+    findings_by_file = {}
     for finding in report.findings:
-        if finding.risk_level not in findings_by_risk:
-            findings_by_risk[finding.risk_level] = []
-        findings_by_risk[finding.risk_level].append(finding)
-    
-    # Print findings by risk level
-    for risk_level in sorted(findings_by_risk.keys(), reverse=True):
-        # Set color based on risk level
-        risk_color = {
-            RiskLevel.CRITICAL: "red",
-            RiskLevel.HIGH: "yellow",
-            RiskLevel.MEDIUM: "magenta",
-            RiskLevel.LOW: "blue"
-        }.get(risk_level, "white")
+        file_path = finding.file_path
+        if file_path not in findings_by_file:
+            findings_by_file[file_path] = []
+        findings_by_file[file_path].append(finding)
+
+    # Get the scan directory path
+    scan_dir = Path(os.getcwd())
+
+    # Process each file's findings separately
+    for file_path, file_findings in findings_by_file.items():
+        # Get relative path from scan directory
+        try:
+            path = Path(file_path)
+            if path.is_absolute():
+                try:
+                    file_display = str(path.relative_to(scan_dir))
+                except ValueError:
+                    file_display = path.name
+            else:
+                file_display = str(path)
+        except Exception:
+            file_display = Path(file_path).name
+
+        # Create table for this file
+        console.print(f"\n[bold]Findings for: [cyan]{file_display}[/cyan][/bold]\n")
         
-        console.print(f"\n[bold {risk_color}]{risk_level.name} Risk Findings:[/bold {risk_color}]")
-        
-        # Create table for this risk level
         table = Table(
             show_header=True,
             header_style="bold",
-            border_style=risk_color,
             expand=True,
-            show_lines=True
+            show_lines=True,
+            padding=(0, 1)
         )
         
-        # Add columns
-        table.add_column("Line", style="dim", no_wrap=True)
-        table.add_column("Pattern", style="bold")
+        # Add columns without width constraints
+        table.add_column("Line", style="dim", justify="right")
         table.add_column("Description", style="white")
-        table.add_column("Context", style="bright_black")
-        table.add_column("Impact", style="magenta")
+        table.add_column("Evidence", style="bright_black")
         table.add_column("Remediation", style="green")
-        
-        # Add rows
-        for finding in findings_by_risk[risk_level]:
-            # Format context without redundant line numbers
+        table.add_column("Risk Level", style="yellow")
+
+        # Sort findings by risk level (highest first)
+        risk_level_order = {
+            RiskLevel.CRITICAL: 4,
+            RiskLevel.HIGH: 3,
+            RiskLevel.MEDIUM: 2,
+            RiskLevel.LOW: 1
+        }
+        sorted_findings = sorted(
+            file_findings,
+            key=lambda x: risk_level_order.get(x.risk_level, 0),
+            reverse=True
+        )
+
+        for finding in sorted_findings:
+            # Format context lines
             context_lines = []
             if finding.context:
-                # Split context into lines and clean up
                 lines = finding.context.split('\n')
                 for line in lines:
-                    # Remove redundant "Line X:" prefixes if they exist
                     cleaned_line = re.sub(r'^Line \d+:\s*', '', line.strip())
                     if cleaned_line:
                         context_lines.append(cleaned_line)
-            
-            # Add row to table
+
+            # Add row with proper styling based on risk level
+            risk_style = {
+                RiskLevel.CRITICAL: "bold red",
+                RiskLevel.HIGH: "bold yellow",
+                RiskLevel.MEDIUM: "bold magenta",
+                RiskLevel.LOW: "bold blue"
+            }.get(finding.risk_level, "white")
+
             table.add_row(
                 str(finding.line_number) if finding.line_number else "N/A",
-                finding.pattern,
                 finding.security_info.description,
                 "\n".join(context_lines),
-                finding.security_info.impact,
-                finding.security_info.remediation
+                finding.security_info.remediation,
+                Text(finding.risk_level.name, style=risk_style)
             )
-        
+
         console.print(table)
-        console.print()  # Add spacing between risk levels
+    
+    console.print()  # Add spacing after all tables
 
 def main():
     """
@@ -505,29 +574,68 @@ def main():
     import glob
     from pathlib import Path
     
-    if len(sys.argv) < 2:
-        print("Usage: python -m agent_security.scanner <path>")
-        sys.exit(1)
+    # Handle both direct script execution and module execution
+    args = sys.argv[1:]
     
-    path = sys.argv[1]
-    base_path = Path(path).resolve()
-    if not base_path.exists():
-        print(f"Path not found: {path}")
-        sys.exit(1)
-    
-    # Load ignored findings
-    ignored_findings = load_ignored_findings(base_path)
-    
-    # Handle both files and directories
-    if base_path.is_file():
-        report = scan_file(str(base_path), ignored_findings, base_path.parent)
-        print_report(report)
+    # If run as module (python -m agent_security scan path)
+    if len(args) >= 2 and args[0] == 'scan':
+        path = args[1]
+    # If run directly (python scanner.py path)
+    elif len(args) >= 1:
+        path = args[0]
     else:
-        # Scan all Python and YAML files in the directory
-        for ext in ['*.py', '*.yaml', '*.yml']:
-            for file_path in glob.glob(str(base_path / '**' / ext), recursive=True):
-                report = scan_file(file_path, ignored_findings, base_path)
-                print_report(report)
+        logger.info("Usage: python -m agent_security scan <path>")
+        logger.info("   or: python scanner.py <path>")
+        sys.exit(1)
+    
+    try:
+        base_path = Path(path).resolve()
+        if not base_path.exists():
+            logger.error(f"Path not found: {path}")
+            sys.exit(1)
+        
+        # Load ignored findings
+        ignored_findings = load_ignored_findings(base_path)
+        
+        if base_path.is_file():
+            # Scan a single file
+            report = scan_file(str(base_path), ignored_findings, base_path.parent)
+            print_report(report)
+            return report  # Return report for API usage
+        else:
+            # Create a combined report for directory scanning
+            combined_report = SecurityReport(
+                findings=[],
+                overall_risk=RiskLevel.LOW,
+                file_path=str(base_path),
+                timestamp=datetime.now().isoformat()
+            )
+            
+            # Scan all Python and YAML files in the directory
+            for ext in ['*.py', '*.yaml', '*.yml']:
+                for file_path in glob.glob(str(base_path / '**' / ext), recursive=True):
+                    try:
+                        file_report = scan_file(file_path, ignored_findings, base_path)
+                        if file_report.findings:  # Only add reports that have findings
+                            logger.info(f"Found {len(file_report.findings)} issues in {file_path}")
+                            combined_report.findings.extend(file_report.findings)
+                            if file_report.overall_risk > combined_report.overall_risk:
+                                combined_report.overall_risk = file_report.overall_risk
+                    except Exception as e:
+                        logger.error(f"Error scanning file {file_path}: {e}")
+            
+            # Print findings if any were found
+            if combined_report.findings:
+                print_report(combined_report)
+            else:
+                logger.info("\nNo vulnerabilities found.")
+                
+            return combined_report  # Return report for API usage
+                
+    except Exception as e:
+        logger.error(f"Error during scan: {e}")
+        sys.exit(1)
+        return None
 
 if __name__ == '__main__':
     main()

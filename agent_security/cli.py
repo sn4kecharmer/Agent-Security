@@ -3,27 +3,29 @@ Command-line interface for the Agent Security Scanner.
 """
 
 import json
-import sys # Added for sys.stdout
+import sys
 import typer
-import csv  # Added for CSV export
+import csv
 from rich.console import Console
-from rich.table import Table # rich.table is used by typer scan and new table func
+from rich.table import Table
 from rich.panel import Panel
 from rich.markdown import Markdown
-from rich.logging import RichHandler  # Added missing import
+from rich.logging import RichHandler
 from pathlib import Path
-from typing import Optional, List, Dict, Any  # Added Dict, Any
-import datetime  # Added for timestamp in report processing
+from typing import Optional, List, Dict, Any
+import datetime
 import argparse
 import re
 import logging
 import os
+import glob
+
 try:
     from tabulate import tabulate
 except ImportError:
     tabulate = None # Handle missing library later
-from .models import RiskLevel, SecurityInfo
-from .scanner import scan_file, scan_git_repository, load_ignored_findings, GET_allowed_actions, GET_contextual_risk_for_action # Import load_ignored_findings
+from .models import RiskLevel, SecurityInfo, SecurityReport
+from .scanner import scan_file, scan_git_repository, load_ignored_findings, GET_allowed_actions, GET_contextual_risk_for_action
 from .patterns import TOOL_RISKS, YAML_TOOL_PATTERNS
 
 # Configure logging
@@ -33,7 +35,7 @@ logging.basicConfig(
     datefmt="[%X]",
     handlers=[
         RichHandler(rich_tracebacks=True, markup=True),
-        logging.FileHandler("agent_security.log")
+        logging.FileHandler("agent_security.log", mode="w")
     ]
 )
 
@@ -138,9 +140,15 @@ def scan(
         
         # Handle JSON output if requested
         if output:
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(report.to_dict() if report else {}, f, indent=2)
-            console.print(f"Results exported to [green]{output}[/green]")
+            try:
+                abs_path = os.path.abspath(output)
+                with open(abs_path, "w", encoding="utf-8") as f:
+                    json_data = report.to_dict() if report else {}
+                    json.dump(json_data, f, indent=2)
+                    f.flush()  # Force flush the file
+                console.print(f"Results exported to [green]{output}[/green]")
+            except Exception as e:
+                logger.error(f"Error during JSON report generation: {e}")
         
         # Display the report in the console
         display_report(report, explain)
@@ -190,7 +198,9 @@ def generate_csv_report(findings_list: List[Dict[str, Any]], output_filepath: st
         "remediation",
     ]
     try:
+        logger.debug(f"generate_csv_report: Attempting to open {output_filepath} for writing.")
         with open(output_filepath, "w", newline="", encoding="utf-8") as csvfile:
+            logger.debug(f"generate_csv_report: Successfully opened {output_filepath}.")
             writer = csv.writer(csvfile)
             writer.writerow(header)
 
@@ -215,10 +225,14 @@ def generate_csv_report(findings_list: List[Dict[str, Any]], output_filepath: st
                     security_info.get("remediation", ""),
                 ]
                 writer.writerow(row_data)
+            logger.debug(f"generate_csv_report: Finished writing rows to {output_filepath}.")
         print(f"CSV report successfully generated at: {output_filepath}")
+        logger.info(f"CSV report successfully generated at: {output_filepath}")
     except IOError as e:
+        logger.error(f"generate_csv_report: IOError when writing to {output_filepath}. Reason: {e}", exc_info=True)
         print(f"Error: Could not write CSV file to {output_filepath}. Reason: {e}")
     except AttributeError as e:
+        logger.error(f"generate_csv_report: AttributeError during CSV generation for {output_filepath}: {e}", exc_info=True)
         # This might occur if the structure of finding dicts is unexpected
         print(f"Error: Missing expected attribute during CSV generation: {e}")
         print("Please check the structure of the scan results.")
@@ -502,8 +516,36 @@ def scan_target(target_path: str, branch: Optional[str] = None, explain: bool = 
     # Load ignored findings from the base path
     ignored_findings = load_ignored_findings(base_path)
 
-    report = scan_file(str(scan_path), ignored_findings, base_path)
-    return report
+    # Check if it's a directory or a file
+    if scan_path.is_dir():
+        # This is a directory scan - use glob to find all Python and YAML files
+        print(f"Scanning directory: {scan_path}")
+        # Create a combined report for directory scanning
+        combined_report = SecurityReport(
+            findings=[],
+            overall_risk=RiskLevel.LOW,
+            file_path=str(scan_path),
+            timestamp=datetime.datetime.now().isoformat()
+        )
+        
+        # Scan all Python and YAML files in the directory
+        for ext in ['*.py', '*.yaml', '*.yml']:
+            for file_path in glob.glob(str(scan_path / '**' / ext), recursive=True):
+                try:
+                    print(f"Scanning file: {file_path}")
+                    file_report = scan_file(file_path, ignored_findings, scan_path)
+                    if file_report and hasattr(file_report, 'findings') and file_report.findings:
+                        print(f"Found {len(file_report.findings)} issues in {file_path}")
+                        combined_report.findings.extend(file_report.findings)
+                        if hasattr(file_report, 'overall_risk') and file_report.overall_risk > combined_report.overall_risk:
+                            combined_report.overall_risk = file_report.overall_risk
+                except Exception as e:
+                    print(f"Error scanning file {file_path}: {e}")
+        
+        return combined_report
+    else:
+        # Single file scan
+        return scan_file(str(scan_path), ignored_findings, base_path)
 
 @app.callback()
 def callback():
@@ -569,8 +611,25 @@ def generate_html_report(findings_list: List[Dict[str, Any]], output_filepath: s
                 if not evidence:
                     evidence = security_info.get("evidence", "N/A")
                 
+                # Get the full file path and extract just the directory name and filename
+                full_path = finding.get("file_path", "N/A")
+                # Handle the case of N/A
+                if full_path != "N/A":
+                    import os
+                    path_parts = os.path.normpath(full_path).split(os.sep)
+                    if len(path_parts) > 1:
+                        # Get the directory name and filename
+                        directory = path_parts[-2]
+                        filename = path_parts[-1]
+                        file_path = f"{directory}/{filename}"
+                    else:
+                        # Just the filename if there's no directory
+                        file_path = path_parts[-1]
+                else:
+                    file_path = "N/A"
+                
                 # Escape HTML special characters
-                file_path = finding.get("file_path", "N/A").replace("<", "&lt;").replace(">", "&gt;")
+                file_path = file_path.replace("<", "&lt;").replace(">", "&gt;")
                 pattern = finding.get("pattern", "N/A").replace("<", "&lt;").replace(">", "&gt;")
                 description = security_info.get("description", "N/A").replace("<", "&lt;").replace(">", "&gt;")
                 evidence = evidence.replace("<", "&lt;").replace(">", "&gt;")
@@ -603,6 +662,8 @@ def generate_html_report(findings_list: List[Dict[str, Any]], output_filepath: s
         print(f"Error: Could not write HTML file to {output_filepath}. Reason: {e}")
     except Exception as e:
         print(f"An unexpected error occurred during HTML generation: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 # Update the main function to handle HTML output
 @app.command()
@@ -620,20 +681,62 @@ def main(
     Scan agent configurations for security issues.
     """
     try:
-        scan_target(target, branch, explain)
+        # Perform the scan
+        report = scan_target(target, branch, explain)
+        
+        # Convert findings to list format
+        findings_list = []
+        if report and hasattr(report, 'findings'):
+            findings_list = [
+                {
+                    "file_path": finding.file_path,
+                    "line_number": finding.line_number,
+                    "pattern": finding.pattern,
+                    "risk_level": finding.risk_level.name if hasattr(finding.risk_level, 'name') else str(finding.risk_level),
+                    "context": finding.context,
+                    "security_info": finding.security_info.__dict__ if finding.security_info else {}
+                }
+                for finding in report.findings
+            ]
+        
+        # Handle HTML output if requested
+        if output_html:
+            logger.debug(f"Attempting to generate HTML report at: {output_html}")
+            generate_html_report(findings_list, output_html)
+            logger.debug(f"Finished generate_html_report call for: {output_html}")
+        
+        # Handle CSV output if requested
+        if output_csv:
+            logger.debug(f"Attempting to generate CSV report at: {output_csv}")
+            generate_csv_report(findings_list, output_csv)
+            logger.debug(f"Finished generate_csv_report call for: {output_csv}")
+        
+        # Handle JSON output if requested
+        if output:
+            logger.debug(f"Attempting to generate JSON report at: {output}")
+            try:
+                with open(output, "w", encoding="utf-8") as f:
+                    logger.debug(f"Successfully opened {output} for writing.")
+                    json.dump(report.to_dict() if report else {}, f, indent=2)
+                    logger.debug(f"Successfully wrote JSON content to {output}.")
+                    f.flush()  # Force flush the file
+                console.print(f"Results exported to [green]{output}[/green]")
+                logger.debug(f"JSON report generation complete for: {output}")
+                if len(logger.handlers) > 1:
+                    logger.handlers[1].flush()  # Force flush to file
+            except Exception as e:
+                logger.error(f"Error during JSON report generation for {output}: {e}", exc_info=True)
+                if len(logger.handlers) > 1:
+                    logger.handlers[1].flush()  # Force flush to file
+        
+        # Display the report in the console
+        display_report(report, explain)
+        
     except Exception as e:
         logging.error(f"Error: {e}")
         if "--verbose" in sys.argv:
             logging.exception("Detailed error:")
         sys.exit(1)
-
-    # Handle CSV output if requested
-    if output_csv:
-        generate_csv_report(findings_list, output_csv)
-
-    # Handle HTML output if requested
-    if output_html:
-        generate_html_report(findings_list, output_html)
 
 if __name__ == "__main__":
     app()

@@ -2,22 +2,6 @@
 
 A command-line tool designed to scan LLM agent configurations and code (supporting LangChain, AutoGen, YAML, and Python files) to identify potential security risks and vulnerabilities. It analyzes tool usage, permissions, configurations, and code patterns to generate a comprehensive security report.
 
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-### Usage and Contribution Terms:
-- You are free to use, modify, and distribute this software
-- You must include the original copyright notice and license
-- Contributions are welcome and will be licensed under the same terms
-- No warranty is provided; use at your own risk
-- If you create derivative works, please:
-  - Clearly indicate changes from the original
-  - Do not use our name to endorse your modifications
-  - Maintain the spirit of security and responsible disclosure
-
-For commercial support or custom licensing options, please contact the maintainers.
-
 ## Key Features
 
 -   **Broad Framework Support:** Scans configurations and code for popular agent frameworks like LangChain, AutoGen, and CrewAI.
@@ -260,6 +244,22 @@ chmod +x docker-scan.sh
 # Scan with options
 ./docker-scan.sh ./your-project --output-csv results.csv
 ```
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Usage and Contribution Terms:
+- You are free to use, modify, and distribute this software
+- You must include the original copyright notice and license
+- Contributions are welcome and will be licensed under the same terms
+- No warranty is provided; use at your own risk
+- If you create derivative works, please:
+  - Clearly indicate changes from the original
+  - Do not use our name to endorse your modifications
+  - Maintain the spirit of security and responsible disclosure
+
+For commercial support or custom licensing options, please contact the maintainers.
 
 ## Development
 

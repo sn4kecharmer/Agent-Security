@@ -154,7 +154,7 @@ python -m agent_security scan ./examples/langchain_agent.py --output report.json
 
 Here's an example of what the scanner output looks like in the terminal:
 
-![Example Scanner Output](results.jpg)
+![Example Scanner Output](agent_security/results.jpg)
 
 The output shows:
 - Color-coded risk levels for easy identification

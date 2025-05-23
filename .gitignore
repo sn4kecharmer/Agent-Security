@@ -1,7 +1,5 @@
 # Python
 __pycache__/
-.cursorrules
-*.pyc
 *.py[cod]
 *$py.class
 *.so
@@ -31,6 +29,8 @@ wheels/
 *.cursorrules
 enhanced_risk_description_plan.md
 penetration_test_report_agent_security.md
+scan_results.json
+test_write.txt
 
 # Environment
 .env
@@ -47,17 +47,7 @@ ENV/
 *.swo
 *~
 .DS_Store
-scan_results.json
-test_write.txt
+.cursorrules
+
+# GitHub
 .github/workflows/test.yml
-agent_security/patterns/__pycache__/__init__.cpython-313.pyc
-agent_security/tests/__pycache__/edge_cases.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_cli.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_crewai_and_ignore.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_scanner.cpython-313-pytest-8.3.5.pyc
-llm_agent_security_scanning_phase1_tests/.DS_Store
-agent_security/patterns/__pycache__/__init__.cpython-313.pyc
-agent_security/tests/__pycache__/edge_cases.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_cli.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_crewai_and_ignore.cpython-313-pytest-8.3.5.pyc
-agent_security/tests/__pycache__/test_scanner.cpython-313-pytest-8.3.5.pyc

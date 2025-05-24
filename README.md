@@ -274,6 +274,11 @@ Recent improvements to the Agent Security Scanner include:
   - Unsafe YAML deserialization vulnerabilities (including !!python/object tags)
   - Overly permissive tool access patterns (shell_exec, file_write capabilities)
   - Verbose logging configurations that could leak sensitive data
+    - Persistent memory configurations in YAML.
+    - YAML settings allowing untrusted input.
+    - Disabled authentication in YAML configurations.
+    - Non-redacted logging settings in YAML.
+    - AutoGen agents configured for direct host code execution.
 
 - **Improved YAML Parsing**: Added special handling for YAML parsing errors to detect deserialization vulnerabilities
 

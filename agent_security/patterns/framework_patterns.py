@@ -21,13 +21,6 @@ FRAMEWORK_PATTERNS = {
         impact="Code executed by the agent runs directly on the host, potentially leading to system compromise.",
         remediation="Set `use_docker=True` in `code_execution_config` to run code in a container, or ensure the agent only executes thoroughly vetted code."
     ),
-    "autogen_agent_tools_risk": SecurityInfo(
-        risk_level=RiskLevel.MEDIUM,
-        pattern=re.compile(r"(AssistantAgent|UserProxyAgent|RetrieveAssistantAgent)\s*\([^)]*tools\s*=\s*\[", re.IGNORECASE),
-        description="AutoGen agent configured with tools. Review tools for risks.",
-        impact="Tools can grant significant capabilities (network, file system, code execution). The specific tools listed must be reviewed for their individual risks.",
-        remediation="Scrutinize the list of tools provided to the agent. Ensure each tool adheres to the principle of least privilege. For custom tools, ensure their code is secure."
-    ),
     
     # LangChain Patterns
     "langchain_unsafe_agent": SecurityInfo(

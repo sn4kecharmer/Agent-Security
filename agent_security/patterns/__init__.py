@@ -58,7 +58,7 @@ TOOL_RISKS = {
     ),
     "crewai_agent": SecurityInfo(
         risk_level=RiskLevel.HIGH,
-        pattern=re.compile(r"Agent\("),
+        pattern=re.compile(r"Agent\s*\([^)]*(?:role|goal)\s*="),
         description="CrewAI agent creation detected",
         impact="Potential security risks from agent capabilities",
         remediation="Implement proper security controls and validation for agent actions"
@@ -262,7 +262,35 @@ YAML_TOOL_PATTERNS = {
         description="Unsafe YAML deserialization",
         impact="Could allow arbitrary code execution through YAML deserialization",
         remediation="Use yaml.safe_load() or explicitly specify SafeLoader"
-    )
+    ),
+    "persistent_memory_yaml": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"type:\s*\"?persistent\"?|store_history:\s*true", re.IGNORECASE),
+        description="Persistent memory or history storage enabled (YAML)",
+        impact="Sensitive data may be stored insecurely; agent state can be tampered with if storage is compromised.",
+        remediation="Use ephemeral memory for sensitive operations. If persistence is required, ensure storage is encrypted and access-controlled. Regularly review and purge stored data."
+    ),
+    "allow_untrusted_input_yaml": SecurityInfo(
+        risk_level=RiskLevel.HIGH,
+        pattern=re.compile(r"allow_untrusted_input:\s*true", re.IGNORECASE),
+        description="Agent configured to allow untrusted input (YAML)",
+        impact="Increases risk of injection attacks (prompt injection, data injection) if input is not rigorously sanitized.",
+        remediation="Treat all input as untrusted. Implement strong input validation and sanitization routines. Prefer structured input over free-form text where possible."
+    ),
+    "authentication_disabled_yaml": SecurityInfo(
+        risk_level=RiskLevel.CRITICAL,
+        pattern=re.compile(r"authentication_required:\s*false", re.IGNORECASE),
+        description="Agent authentication requirement is disabled (YAML)",
+        impact="Agent may be accessed or controlled by unauthorized users/systems, leading to misuse or data exposure.",
+        remediation="Enable authentication for the agent. Use strong credentials and standard authentication protocols."
+    ),
+    "sensitive_logging_not_redacted_yaml": SecurityInfo(
+        risk_level=RiskLevel.MEDIUM,
+        pattern=re.compile(r"redact_sensitive:\s*false", re.IGNORECASE),
+        description="Sensitive data may not be redacted from logs (YAML)",
+        impact="Sensitive information (credentials, PII, confidential data) could be exposed in logs, increasing risk if logs are compromised.",
+        remediation="Ensure sensitive data is redacted from logs by default. If verbose logging is needed for debugging, ensure logs are stored securely and access is strictly controlled."
+    ),
 }
 
 # Action risk descriptions

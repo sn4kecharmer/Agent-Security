@@ -1,3 +1,4 @@
+LICENSE
 README.md
 setup.py
 agent_security/__init__.py
@@ -14,3 +15,9 @@ agent_security.egg-info/dependency_links.txt
 agent_security.egg-info/entry_points.txt
 agent_security.egg-info/requires.txt
 agent_security.egg-info/top_level.txt
+agent_security/patterns/__init__.py
+agent_security/patterns/agent_patterns.py
+agent_security/patterns/agent_specific_patterns.py
+agent_security/patterns/environment_patterns.py
+agent_security/patterns/framework_patterns.py
+agent_security/patterns/tool_patterns.py

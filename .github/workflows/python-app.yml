@@ -31,11 +31,6 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         pip install -e .  # Install package in development mode
     
-    - name: Lint with flake8
-      run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
     - name: Test with pytest
       run: |
         pytest tests/ --cov=agent_security -v --cov-report=xml

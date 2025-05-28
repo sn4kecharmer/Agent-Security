@@ -1,0 +1,18 @@
+{
+  "name": "Unsafe Code Eval",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "eval('console.log(\"dangerous eval\")');"
+      },
+      "name": "Code With Eval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [    800,    520   ]
+    }
+  ],
+  "connections": {},
+  "active": false,
+  "settings": {},
+  "id": "3"
+}

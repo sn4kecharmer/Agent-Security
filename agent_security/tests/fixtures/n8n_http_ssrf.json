@@ -1,0 +1,28 @@
+{
+  "name": "HTTP SSRF Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [ 250, 300 ],
+      "id": "start-node-http-ssrf"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5000/internal/data",
+        "options": {}
+      },
+      "name": "HTTP Request with SSRF URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [ 470, 300 ],
+      "id": "http-node-ssrf"
+    }
+  ],
+  "connections": {
+    "Start": { "main": [ [ { "node": "HTTP Request with SSRF URL", "type": "main" } ] ] }
+  },
+  "active": false, "settings": {}, "id": "10", "meta": {}
+}

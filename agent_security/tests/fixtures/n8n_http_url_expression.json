@@ -1,0 +1,28 @@
+{
+  "name": "HTTP URL Expression Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [ 250, 300 ],
+      "id": "start-node-http-expr"
+    },
+    {
+      "parameters": {
+        "url": "https://api.example.com/users/{{ $json.userId }}",
+        "options": {}
+      },
+      "name": "HTTP Request with URL Expression",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [ 470, 300 ],
+      "id": "http-node-url-expr"
+    }
+  ],
+  "connections": {
+    "Start": { "main": [ [ { "node": "HTTP Request with URL Expression", "type": "main" } ] ] }
+  },
+  "active": false, "settings": {}, "id": "9", "meta": {}
+}

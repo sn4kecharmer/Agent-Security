@@ -20,7 +20,9 @@ from .patterns import (
     TOOL_PATTERNS
 )
 from .patterns.agent_specific_patterns import AGENT_SECURITY_PATTERNS
+from .n8n_scanner import scan_n8n_workflow_content # Added for n8n scanning
 import ruamel.yaml
+import json # Added for n8n JSON parsing
 from datetime import datetime
 from tabulate import tabulate
 import textwrap
@@ -415,9 +417,6 @@ def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[
             logger.error(f"Error scanning YAML file {file_path}: {e}")
             report.overall_risk = RiskLevel.CRITICAL
             report.metadata = {"error": str(e)}
-        
-    return report
-
 def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_path: Path) -> SecurityReport:
     """
     Scan a file for security issues based on its extension, skipping ignored findings.
@@ -454,11 +453,16 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
     if file_path.suffix == '.py':
         return scan_python_file(str(file_path), ignored_findings, base_path)
     elif file_path.suffix in ['.yaml', '.yml']:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f: # Specify encoding
             content = f.read()
         return scan_yaml_content(content, str(file_path), ignored_findings, base_path)
+    elif file_path.suffix == '.json': # Added for n8n workflow files
+        with open(file_path, 'r', encoding='utf-8') as f: # Specify encoding
+            content = f.read()
+        return scan_n8n_workflow_content(content, str(file_path), ignored_findings, base_path)
     else:
         # For unsupported file types, return an empty report
+        # logger.debug(f"Unsupported file type: {file_path}, skipping.")
         return SecurityReport(
             findings=[],
             overall_risk=RiskLevel.LOW,
@@ -611,18 +615,23 @@ def main():
                 timestamp=datetime.now().isoformat()
             )
             
-            # Scan all Python and YAML files in the directory
-            for ext in ['*.py', '*.yaml', '*.yml']:
-                for file_path in glob.glob(str(base_path / '**' / ext), recursive=True):
+            # Scan all Python, YAML, and JSON files in the directory
+            for ext in ['*.py', '*.yaml', '*.yml', '*.json']: # Added *.json
+                for file_path_str in glob.glob(str(base_path / '**' / ext), recursive=True):
+                    file_path = Path(file_path_str)
+                    # Ensure we are not picking up files from .git or other VCS directories, or node_modules etc.
+                    if any(part.startswith('.') for part in file_path.parts) or 'node_modules' in file_path.parts:
+                        logger.debug(f"Skipping potentially hidden or vendor directory: {file_path}")
+                        continue
                     try:
-                        file_report = scan_file(file_path, ignored_findings, base_path)
+                        file_report = scan_file(str(file_path), ignored_findings, base_path) # Use str(file_path)
                         if file_report.findings:  # Only add reports that have findings
-                            logger.info(f"Found {len(file_report.findings)} issues in {file_path}")
+                            logger.info(f"Found {len(file_report.findings)} issues in {file_path_str}")
                             combined_report.findings.extend(file_report.findings)
                             if file_report.overall_risk > combined_report.overall_risk:
                                 combined_report.overall_risk = file_report.overall_risk
                     except Exception as e:
-                        logger.error(f"Error scanning file {file_path}: {e}")
+                        logger.error(f"Error scanning file {file_path_str}: {e}")
             
             # Print findings if any were found
             if combined_report.findings:

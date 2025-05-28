@@ -1,0 +1,27 @@
+{
+  "name": "Code New Function Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [ 250, 300 ],
+      "id": "start-node-new-func"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sum = new Function('a', 'b', 'return a + b;');\n$items[0].json.result = sum(1,2);"
+      },
+      "name": "Use New Function",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [ 470, 300 ],
+      "id": "code-node-new-func"
+    }
+  ],
+  "connections": {
+    "Start": { "main": [ [ { "node": "Use New Function", "type": "main" } ] ] }
+  },
+  "active": false, "settings": {}, "id": "4", "meta": {}
+}

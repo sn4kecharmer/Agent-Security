@@ -1,0 +1,55 @@
+{
+  "name": "Safe Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "id": "e2e5a7ac-8c1c-4c7a-8f6b-f7a7c7a0a1e2"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "safe_data",
+              "value": "This is some safe data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Safe Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        470,
+        300
+      ],
+      "id": "a1b2c3d4-e5f6-7g8h-9i0j-k1l2m3n4o5p6"
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Set Safe Data",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

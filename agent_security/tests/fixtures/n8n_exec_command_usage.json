@@ -1,0 +1,27 @@
+{
+  "name": "Execute Command Usage Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [ 250, 300 ],
+      "id": "start-node-exec"
+    },
+    {
+      "parameters": {
+        "command": "echo 'Hello World'"
+      },
+      "name": "Execute Echo",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [ 470, 300 ],
+      "id": "exec-node-basic"
+    }
+  ],
+  "connections": {
+    "Start": { "main": [ [ { "node": "Execute Echo", "type": "main" } ] ] }
+  },
+  "active": false, "settings": {}, "id": "6", "meta": {}
+}

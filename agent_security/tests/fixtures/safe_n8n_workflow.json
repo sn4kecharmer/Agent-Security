@@ -1,0 +1,19 @@
+{
+  "name": "Safe Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://n8n.io",
+        "options": {}
+      },
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [    800,    520   ]
+    }
+  ],
+  "connections": {},
+  "active": false,
+  "settings": {},
+  "id": "1"
+}

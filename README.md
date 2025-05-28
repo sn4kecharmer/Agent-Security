@@ -8,6 +8,7 @@ A command-line tool designed to scan LLM agent configurations and code (supporti
 -   **Multiple Format Analysis:** Supports direct scanning of Python (`.py`) files and YAML (`.yaml`, `.yml`) configuration files.
 -   **Code Intelligence:** Utilizes Abstract Syntax Trees (AST) for deeper, more accurate analysis of Python code.
 -   **Configuration Awareness:** Performs pattern matching within YAML files for insecure settings.
+-   **n8n Workflow Scanning:** Analyzes n8n workflow JSON files for common security vulnerabilities, including risky node configurations (e.g., Code, Execute Command nodes) and potential credential exposure.
 -   **Git Repository Scanning:** Can directly scan agent configurations hosted in Git repositories.
 -   **Comprehensive Risk Detection:** Identifies security issues including dangerous tool usage, code execution, file system access, and network vulnerabilities.
 -   **Detailed Reporting:** Generates reports with risk levels (Critical, High, Medium, Low), descriptions, and remediation advice.

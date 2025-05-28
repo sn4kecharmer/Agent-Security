@@ -1,0 +1,27 @@
+{
+  "name": "Code Env Access Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [ 250, 300 ],
+      "id": "start-node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiKey = process.env.API_KEY;\n$items[0].json.key = apiKey;"
+      },
+      "name": "Access Env Var",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [ 470, 300 ],
+      "id": "code-node-env"
+    }
+  ],
+  "connections": {
+    "Start": { "main": [ [ { "node": "Access Env Var", "type": "main" } ] ] }
+  },
+  "active": false, "settings": {}, "id": "2", "meta": {}
+}

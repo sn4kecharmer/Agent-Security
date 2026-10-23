@@ -2,6 +2,7 @@
 
 This file is not imported by the scanner or deployed as an application.
 The acceptance retry validates the repaired reviewer dependency and routing.
+Its controller preserves container metadata when changing launch settings.
 It contains no credentials, network calls, or executable target payloads.
 """
 

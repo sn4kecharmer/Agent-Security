@@ -11,7 +11,11 @@ A command-line tool designed to scan LLM agent configurations and code (supporti
 -   **Git Repository Scanning:** Can directly scan agent configurations hosted in Git repositories.
 -   **Comprehensive Risk Detection:** Identifies security issues including dangerous tool usage, code execution, file system access, and network vulnerabilities.
 -   **Detailed Reporting:** Generates reports with risk levels (Critical, High, Medium, Low), descriptions, and remediation advice.
--   **Flexible Output:** Provides reports in console format, JSON (`--output`), and CSV (`--output-csv`).
+-   **Flexible Output:** Generates reports in console format, JSON (`--output`), and CSV (`--output-csv`).
+-   **Current Agent Checks:** Adds Python AST checks for dynamic execution, `subprocess` with `shell=True`, and unsafe YAML loading.
+-   **MCP Configuration Checks:** Scans agent/MCP JSON config for shell-wrapped server launch, HTTP endpoints, wildcard tool scopes, disabled approvals, and token passthrough.
+-   **Secret-Safe Findings:** Flags likely hardcoded credentials and redacts their values from v1.1 finding evidence.
+-   **CI Gate:** `--fail-on critical|high|medium|low` returns a non-zero exit status at the selected risk threshold.
 -   **False Positive Management:** Allows ignoring specific findings via a `.agent_security_ignore` file.
 -   **Enhanced Security:** Implements safe YAML loading, path validation, and improved pattern detection.
 -   **Docker Support:** Run the scanner in an isolated environment with all dependencies properly installed.
@@ -126,7 +130,15 @@ docker run -v "$(pwd)":/scan agent-security /scan/examples/vulnerable_yaml_openA
 -   `--output-html <report.html>`: Generate a detailed HTML report with color-coded findings.
 -   `--explain`: Include detailed explanations of risk levels.
 -   `--json-stdout`: Output the report in JSON format to stdout.
+-   `--fail-on <risk>`: Exit with status 1 when the overall risk meets or exceeds `critical`, `high`, `medium`, or `low`.
 -   `-f, --format {json,table}`: Specify the output format.
+
+MCP/agent JSON files such as `mcp.json`, `mcp_config.json`, and `claude_desktop_config.json` are scanned directly or as part of a directory scan. Other JSON files are considered only when they contain recognizable agent/MCP configuration keys.
+
+Example CI command:
+```bash
+python -m agent_security scan ./your-agent --fail-on high --output security-report.json
+```
 
 ## HTML Reports
 
@@ -207,6 +219,12 @@ The scanner checks for various security vulnerabilities and risky patterns, incl
 -   **HIGH**: Significant risk. Unrestricted file system or network access.
 -   **MEDIUM**: Moderate risk. Limited external access or potential information leakage.
 -   **LOW**: Minimal risk. Safe, isolated operations.
+
+## v1.1 scope and limits
+
+Version 1.1 adds inspectable static heuristics for modern agent deployments, especially MCP server configuration and consequential tool permissions. See the [changelog](CHANGELOG.md) and [security model and coverage notes](docs/THREAT_MODEL.md) for details, threat assumptions, and sources.
+
+This project is a static-analysis helper, not an agent runtime firewall. It cannot prove that a tool is safe, reliably detect indirect prompt injection, validate downstream user authorization, or confirm that sandboxing and approval controls work. Findings require human review, and no findings does not mean an agent is secure. Enforce authorization in tools and downstream services, isolate code execution, use least-privileged credentials, and review/pin server and dependency sources.
 
 ## Ignoring Findings
 

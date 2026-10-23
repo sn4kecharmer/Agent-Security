@@ -71,7 +71,7 @@ TOOL_RISKS = {
         remediation="Validate task inputs and outputs, implement proper error handling"
     ),
     "crewai_autonomous": SecurityInfo(
-        risk_level=RiskLevel.CRITICAL,
+        risk_level=RiskLevel.HIGH,
         pattern=re.compile(r"\.kickoff\(|\.process\(|\.run\("),
         description="CrewAI autonomous execution detected",
         impact="Potential security risks from autonomous agent execution",
@@ -301,4 +301,4 @@ ACTION_RISK_DESCRIPTIONS = {
     "unrestricted_api_call": "Allows making unrestricted API calls which could be dangerous",
     "modify_system_settings": "Allows modification of system settings which could be dangerous",
     "network_access": "Allows unrestricted network access which could be dangerous"
-} 
+}

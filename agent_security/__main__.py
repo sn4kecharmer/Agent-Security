@@ -2,7 +2,7 @@
 Main entry point for the agent_security package.
 """
 
-from .scanner import main
+from .cli import entrypoint
 
 if __name__ == '__main__':
-    main()
+    entrypoint()

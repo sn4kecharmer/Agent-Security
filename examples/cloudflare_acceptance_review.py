@@ -1,6 +1,7 @@
 """Offline acceptance fixture for the deployed security-review pipeline.
 
 This file is not imported by the scanner or deployed as an application.
+The acceptance retry validates the repaired reviewer dependency and routing.
 It contains no credentials, network calls, or executable target payloads.
 """
 

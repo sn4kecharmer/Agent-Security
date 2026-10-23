@@ -17,6 +17,7 @@ def visible_records(records, organization_id):
 
 
 def test_organization_boundary():
+    # Check both visible and cross-organization records without network access.
     records = [
         {"id": "one", "name": "Visible", "organization_id": "org-a"},
         {"id": "two", "name": "Other tenant", "organization_id": "org-b"},

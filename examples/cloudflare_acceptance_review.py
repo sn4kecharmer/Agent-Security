@@ -3,6 +3,7 @@
 This file is not imported by the scanner or deployed as an application.
 The acceptance retry validates the repaired reviewer dependency and routing.
 Its controller preserves container metadata when changing launch settings.
+The October 24 acceptance uses the verified Python 3.12.15 reviewer image.
 It contains no credentials, network calls, or executable target payloads.
 """
 

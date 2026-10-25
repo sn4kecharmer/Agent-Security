@@ -19,6 +19,7 @@ import re
 import logging
 import os
 import glob
+from contextlib import redirect_stdout
 
 try:
     from tabulate import tabulate
@@ -106,14 +107,37 @@ def scan(
     explain: bool = typer.Option(False, "--explain", help="Show detailed explanations"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file for results"),
     output_csv: Optional[str] = typer.Option(None, "--output-csv", help="Output CSV file for results"),
-    output_html: Optional[str] = typer.Option(None, "--output-html", help="Output HTML file for results")
+    output_html: Optional[str] = typer.Option(None, "--output-html", help="Output HTML file for results"),
+    json_stdout: bool = typer.Option(False, "--json-stdout", help="Write the JSON report to stdout"),
+    fail_on: Optional[str] = typer.Option(None, "--fail-on", case_sensitive=False, help="Exit with status 1 when findings meet or exceed: critical, high, medium, or low")
 ):
     """
     Scan agent configurations for security issues.
     """
     try:
         # Perform the scan
-        report = scan_target(target, branch, explain)
+        if json_stdout:
+            previous_disable_level = logging.root.manager.disable
+            logging.disable(logging.CRITICAL)
+            try:
+                with redirect_stdout(sys.stderr):
+                    report = scan_target(target, branch, explain)
+            finally:
+                logging.disable(previous_disable_level)
+        else:
+            report = scan_target(target, branch, explain)
+
+        if json_stdout:
+            sys.stdout.write(json.dumps(report.to_dict(), indent=2) + "\n")
+            sys.stdout.flush()
+            if fail_on:
+                threshold = fail_on.upper()
+                risk_order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+                if threshold not in risk_order:
+                    raise typer.BadParameter("Choose critical, high, medium, or low for --fail-on")
+                if report and risk_order.get(report.overall_risk.name, 0) >= risk_order[threshold]:
+                    raise typer.Exit(code=1)
+            return
         
         # Convert findings to list format
         findings_list = []
@@ -152,7 +176,17 @@ def scan(
         
         # Display the report in the console
         display_report(report, explain)
+
+        if fail_on:
+            threshold = fail_on.upper()
+            risk_order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+            if threshold not in risk_order:
+                raise typer.BadParameter("Choose critical, high, medium, or low for --fail-on")
+            if report and risk_order.get(report.overall_risk.name, 0) >= risk_order[threshold]:
+                raise typer.Exit(code=1)
         
+    except typer.Exit:
+        raise
     except Exception as e:
         logging.error(f"Error: {e}")
         if "--verbose" in sys.argv:
@@ -528,8 +562,8 @@ def scan_target(target_path: str, branch: Optional[str] = None, explain: bool = 
             timestamp=datetime.datetime.now().isoformat()
         )
         
-        # Scan all Python and YAML files in the directory
-        for ext in ['*.py', '*.yaml', '*.yml']:
+        # Scan Python, YAML, and JSON agent/MCP configuration files.
+        for ext in ['*.py', '*.yaml', '*.yml', '*.json']:
             for file_path in glob.glob(str(scan_path / '**' / ext), recursive=True):
                 try:
                     print(f"Scanning file: {file_path}")
@@ -787,5 +821,10 @@ def main(
             console.print_exception()
         sys.exit(1)
 
-if __name__ == "__main__":
+def entrypoint() -> None:
+    """Run the Typer command-line application."""
     app()
+
+
+if __name__ == "__main__":
+    entrypoint()

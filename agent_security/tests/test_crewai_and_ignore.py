@@ -14,13 +14,9 @@ def sanitize_error(error: Exception) -> str:
 
 # Add the sanitize_error function to the scanner module directly
 @pytest.fixture(autouse=True)
-def add_sanitize_error_function():
+def add_sanitize_error_function(monkeypatch):
     import agent_security.scanner
-    agent_security.scanner.sanitize_error = sanitize_error
-    yield
-    # Clean up after test
-    if hasattr(agent_security.scanner, 'sanitize_error'):
-        delattr(agent_security.scanner, 'sanitize_error')
+    monkeypatch.setattr(agent_security.scanner, "sanitize_error", sanitize_error)
 
 # Sample CrewAI code for testing
 CREWAI_SAMPLE = """
@@ -144,7 +140,7 @@ def test_crewai_patterns():
             os.unlink(temp_path)
 
 def test_human_in_loop_patterns():
-    """Test detection of human-in-the-loop patterns which should have lower risk."""
+    """A generic CrewAI process call is review-worthy, not automatically critical."""
     with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as temp:
         temp.write(CREWAI_HUMAN_IN_LOOP.encode('utf-8'))
         temp_path = temp.name
@@ -168,9 +164,9 @@ def test_human_in_loop_patterns():
                 human_in_loop_detected = True
                 break
         
-        # If human_in_the_loop is explicitly detected, it should affect the risk assessment
+        # Human input is useful, but the source scanner cannot verify that it gates
+        # every consequential action. Generic process execution is therefore High.
         if human_in_loop_detected:
-            # If the scanner specifically detects human-in-the-loop, risk should be lower
             assert report.overall_risk in [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH]
             
     finally:

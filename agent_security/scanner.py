@@ -20,6 +20,7 @@ from .patterns import (
     TOOL_PATTERNS
 )
 from .patterns.agent_specific_patterns import AGENT_SECURITY_PATTERNS
+from .modern_checks import scan_modern_content
 import ruamel.yaml
 from datetime import datetime
 from tabulate import tabulate
@@ -33,6 +34,11 @@ import logging
 
 # Set up logger
 logger = logging.getLogger("agent_security")
+
+
+def sanitize_error(error: Exception) -> str:
+    """Return a printable error message for logging paths."""
+    return str(error)
 
 # --- False Positive Handling ---
 IGNORE_FILE_NAME = ".agent_security_ignore"
@@ -226,7 +232,7 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                         add_finding(pattern_name, security_info, node.lineno, context)
 
             # Special handling for specific node types
-            if isinstance(node, (ast.Str, ast.Constant)) and isinstance(node.value, str):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 # Check string literals
                 for patterns in pattern_categories:
                     for pattern_name, security_info in patterns.items():
@@ -247,6 +253,8 @@ def scan_python_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]]
                         for pattern_name, security_info in patterns.items():
                             if security_info.pattern.search(func_name):
                                 add_finding(pattern_name, security_info, node.lineno, context)
+
+        scan_modern_content(source, file_path, report, ignored_findings, base_path, python_source=True)
 
         # Calculate overall risk based on findings
         if report.findings:
@@ -360,7 +368,9 @@ def scan_yaml_content(content: str, file_path: str, ignored_findings: Set[Tuple[
         # Start scanning from the root
         if data is not None:
             scan_nested(data)
-        
+
+        scan_modern_content(content, str(file_path), report, ignored_findings, base_path)
+
         # Calculate overall risk based on findings
         if report.findings:
             risk_levels = [f.risk_level for f in report.findings]
@@ -437,16 +447,18 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
         
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
+
+    if file_path.is_file() and file_path.stat().st_size > 10 * 1024 * 1024:
+        raise ValueError(f"File exceeds the 10 MiB scan limit: {file_path}")
         
     # Validate that file_path is within base_path
     try:
         file_path = file_path.resolve(strict=True)
         base_path = base_path.resolve(strict=True)
         
-        # Special case: If file_path is directly under base_path/examples, allow it
-        examples_dir = base_path / 'examples'
-        if not (str(file_path).startswith(str(base_path)) or 
-                (examples_dir.exists() and str(file_path).startswith(str(examples_dir)))):
+        try:
+            file_path.relative_to(base_path)
+        except ValueError:
             raise ValueError(f"File {file_path} is outside the base directory {base_path}")
     except Exception as e:
         raise ValueError(f"Path validation failed: {e}")
@@ -457,6 +469,20 @@ def scan_file(file_path: str, ignored_findings: Set[Tuple[str, int, str]], base_
         with open(file_path, 'r') as f:
             content = f.read()
         return scan_yaml_content(content, str(file_path), ignored_findings, base_path)
+    elif file_path.suffix.lower() == '.json':
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        report = SecurityReport(
+            findings=[],
+            overall_risk=RiskLevel.LOW,
+            file_path=str(file_path),
+            timestamp=datetime.now().isoformat()
+        )
+        agent_config_markers = r'(?i)["\'](?:mcpServers|mcp|agent|agents|tools|approval_required|require_human_approval)["\']\s*:'
+        if Path(file_path).name.lower() not in {'mcp.json', 'mcp_config.json', 'mcp_servers.json', 'claude_desktop_config.json'} and not re.search(agent_config_markers, content):
+            return report
+        scan_modern_content(content, str(file_path), report, ignored_findings, base_path)
+        return report
     else:
         # For unsupported file types, return an empty report
         return SecurityReport(
@@ -730,15 +756,17 @@ class SecurityScanner:
     def validate_file_path(self, file_path: str) -> str:
         """Validate and sanitize file path."""
         try:
-            # Convert to absolute path
-            abs_path = os.path.abspath(file_path)
+            # Resolve symlinks before checking path containment.
+            abs_path = str(Path(file_path).resolve(strict=True))
             
             # Check if path exists
             if not os.path.exists(abs_path):
                 raise FileNotFoundError(f"File not found: {file_path}")
             
-            # Check if path is under base path
-            if not abs_path.startswith(self.base_path):
+            # Check containment by path components, not string prefixes.
+            try:
+                Path(abs_path).relative_to(Path(self.base_path).resolve(strict=True))
+            except ValueError:
                 raise ValueError(f"File path {file_path} is outside base directory")
             
             # Check file permissions

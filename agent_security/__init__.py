@@ -1,5 +1,5 @@
 """
-Agent Security Scanner - A tool for analyzing LLM agent configurations for security risks.
+Agent Security Scanner - Static checks for agent code and configuration.
 """
 
-__version__ = "0.1.0" 
+__version__ = "1.1.0"
